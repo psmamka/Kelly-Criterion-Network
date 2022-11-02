@@ -29,19 +29,19 @@ class BettingEnvBinary():
         self.cur_step = 0
         self.terminated = False
 
-    def step(self, bet_fr):
-        err_msg_bet_fr = "The betting fraction should be between 0.0 and 1.0"
-        assert 0 <= bet_fr <= 1.0, err_msg_bet_fr
+    def step(self, bet_size):
+        err_msg_bet_sz = "The betting amount should be between 0.0 and current capital"
+        assert 0 <= bet_size <= self.cur_cap, err_msg_bet_sz
 
         err_msg_terminated = "You are calling `step` after the episode termination."
         assert not self.terminated, err_msg_terminated
 
         if np.random() < self.win_pr:
             # win
-            reward = self.cur_cap * bet_fr * self.win_fr
+            reward = bet_size * self.win_fr
         else:
             # loss
-            reward = -1 * self.cur_cap * bet_fr * self.loss_fr
+            reward = -1 * bet_size * self.loss_fr
         
         self.cur_cap += reward
         self.cur_step += 1
@@ -52,8 +52,8 @@ class BettingEnvBinary():
 
     def _check_termination(self):
         self.terminated = bool(
-            self.cur_cap > self.max_cap or 
-            self.cur_cap < self.min_cap or 
+            (self.max_cap is not None and self.cur_cap > self.max_cap) or 
+            (self.min_cap is not None and self.cur_cap < self.min_cap) or 
             (self.max_steps is not None and self.cur_step >= self.max_steps)
         )
 
