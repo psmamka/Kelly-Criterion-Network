@@ -2,7 +2,8 @@
 # optimal betting performance.
 # 
 # For a theoretical treatment, see: R. Sutton, A. Barto - Reinforcement Learning, An Introduction (2018), Ch. 10
-# Implementation and method naming are roughly similar to those in S. Raschka, et al: Machine Learning with PyTorch (2022) Ch. 19
+# Implementation and method namings are roughly similar to those in S. Raschka, et al: Machine Learning with PyTorch (2022) Ch. 19
+# 
 
 # For a parametric approximation of the action-value function, we use the following quadratic form for
 # state s and action a and weights vector w:
@@ -30,6 +31,7 @@
 # 
 
 import numpy as np
+from .. import betting_env
 
 class SarsaLearner:
     def __init__(self, env, learning_rate=0.1, discount_factor=1.0,
@@ -47,6 +49,11 @@ class SarsaLearner:
         # w vector: [w_01, w_10, w_02, w_11, w_20]
         self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 =  np.random.uniform(-1.0, 1.0, 5)
 
+    def _q_val(self, s, a):
+        # quadratic form in state (s) and action (a)
+        q = self.w_01 * a + self.w_10 * s + self.w_02 * a * a +  self.w_11 * a * s + self.w_20 * s * s
+        return q
+
     def choose_action(self, state):
         # 
         if np.random.uniform(0, 1) <= self.eps:
@@ -62,4 +69,48 @@ class SarsaLearner:
         else:
             return a_opt
         
+    def update_weights_terminal(self, state, action, reward):
+        # terminal state update
+        return
+
+    def update_weights(self, state, action, reward, next_state, next_action):
+        # non-terminal update
+        return
+        
     
+EPISODES = 100
+
+if __name__ == '__main__':
+    bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
+                                        start_cap=100, max_cap=1E6, min_cap=1, max_steps=100)
+
+    sarsa_agent = SarsaLearner(bet_env, learning_rate=0.1, discount_factor=1.0,
+                            epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001)
+    
+    state = bet_env.reset()
+
+    final_states = np.zeros(EPISODES)
+
+    for e in range(EPISODES):
+        states = np.zeros(bet_env.max_steps)
+        state = bet_env.reset()
+        action = sarsa_agent.choose_action(state)
+
+        for i in range(bet_env.max_steps):
+            next_state, next_reward, terminal = bet_env.step(action)
+            states.append(next_state)
+
+            if terminal or i == bet_env.max_steps - 1:
+                final_states[e] = state
+                sarsa_agent.update_weights_terminal(state, action, reward)
+                break
+            else:
+                reward = next_reward
+                next_action = sarsa_agent.choose_action(state)
+                sarsa_agent.update_weights(state, action, reward, next_state, next_action)
+                state = next_state
+                action = next_action
+
+        # plot states progression in one episode
+    
+    # plot final states for all episodes
