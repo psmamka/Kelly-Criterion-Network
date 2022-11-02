@@ -28,6 +28,7 @@ class BettingEnvBinary():
         self.cur_cap = self.start_cap
         self.cur_step = 0
         self.terminated = False
+        return self.cur_cap
 
     def step(self, bet_size):
         err_msg_bet_sz = "The betting amount should be between 0.0 and current capital"
