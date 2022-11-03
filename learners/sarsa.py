@@ -8,7 +8,7 @@
 # For a parametric approximation of the action-value function, we use the following quadratic form for
 # state s and action a and weights vector w:
 
-# q(s, a, w) = w_10 * s + w_01 * a + w_20 * s^2 + w_11 * s * a + w_02 * a ^ 2
+# q(s, a, w) = w_01 * a + w_10 * s + w_02 * a ^ 2 + w_11 * s * a + w_20 * s^2 
 
 # To find the best action a at each state s, we calculate the q partial derivate w.r.t. a:
 # 
@@ -25,7 +25,9 @@
 # 
 # w_(t+1) = w_t + learning_rate * [R_(t+1) + discount_factor * q(s_(t+1), a_(t+1), w_t) - q(s_t, a_t, w_t)] * Grad_w(q(s_t, a_t, w_t))
 # 
-# where Grad_w(q) indicated the gradient of q(s, a, w) with respect to w
+# where Grad_w(q) indicated the gradient of q(s, a, w) with respect to w:
+# 
+# for quadratic form (lexical ordering of indices 01 to 20): Grad_w(q) = [a, s, a^2, sa, s^2]
 # 
 # To allow exploration, epsilon-greedy action selection is used.
 # 
@@ -55,13 +57,13 @@ class SarsaLearner:
         return q
 
     def choose_action(self, state):
-        # 
+        # epsilon-greedy
         if np.random.uniform(0, 1) <= self.eps:
             action = np.random.uniform(0, state)
             return action
 
         a_opt = (self.w_11 * state + self.w_01) / (-2 * self.w_02)
-
+        # action (betting amount) must be between 0 and full capital (state):
         if a_opt < 0:
             return 0
         elif a_opt > state:
@@ -69,13 +71,19 @@ class SarsaLearner:
         else:
             return a_opt
         
-    def update_weights_terminal(self, state, action, reward):
+    def update_weights_terminal(self, s, a, reward):
         # terminal state update
-        return
+        # w → w + alpha * [R_(t+1) - q(s(t), a(t), w(t))] * Grad_w(q(s, a, w))
+        # Grad_w(q) = [a, s, a^2, s.a, s^2]
+        cor = self.lr * (reward - self._q_val(s, a))
+        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] += cor * np.array([a, s, a * a, s * a, s * s])
 
-    def update_weights(self, state, action, reward, next_state, next_action):
+    def update_weights(self, s, a, reward, next_s, next_a):
         # non-terminal update
-        return
+        # w → w + alpha * [R_(t+1) + gamma * q(s(t+1), a(t+1), w(t)) - q(s(t), a(t), w(t))] * Grad_w
+        cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
+        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] += cor * np.array([a, s, a * a, s * a, s * s])
+
         
     
 EPISODES = 100
