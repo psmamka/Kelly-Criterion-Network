@@ -33,7 +33,12 @@
 # 
 
 import numpy as np
-from .. import betting_env
+import sys
+try:
+    from .. envs import betting_env
+except:
+    sys.path.append('..')
+    from envs import betting_env
 
 class SarsaLearner:
     def __init__(self, env, learning_rate=0.1, discount_factor=1.0,
@@ -76,13 +81,15 @@ class SarsaLearner:
         # w → w + alpha * [R_(t+1) - q(s(t), a(t), w(t))] * Grad_w(q(s, a, w))
         # Grad_w(q) = [a, s, a^2, s.a, s^2]
         cor = self.lr * (reward - self._q_val(s, a))
-        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] += cor * np.array([a, s, a * a, s * a, s * s])
+        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
+            [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
 
     def update_weights(self, s, a, reward, next_s, next_a):
         # non-terminal update
         # w → w + alpha * [R_(t+1) + gamma * q(s(t+1), a(t+1), w(t)) - q(s(t), a(t), w(t))] * Grad_w
         cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
-        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] += cor * np.array([a, s, a * a, s * a, s * s])
+        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
+            [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
 
         
     
@@ -90,7 +97,7 @@ EPISODES = 100
 
 if __name__ == '__main__':
     bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=100, max_cap=1E6, min_cap=1, max_steps=100)
+                                        start_cap=100, max_cap=1E6, min_cap=1, max_steps=20)
 
     sarsa_agent = SarsaLearner(bet_env, learning_rate=0.1, discount_factor=1.0,
                             epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001)
