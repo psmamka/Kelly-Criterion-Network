@@ -37,7 +37,7 @@ class BettingEnvBinary():
         err_msg_terminated = "You are calling `step` after the episode termination."
         assert not self.terminated, err_msg_terminated
 
-        if np.random() < self.win_pr:
+        if np.random.uniform() < self.win_pr:
             # win
             reward = bet_size * self.win_fr
         else:
