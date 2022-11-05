@@ -59,22 +59,28 @@ class SarsaLearner:
     def _q_val(self, s, a):
         # quadratic form in state (s) and action (a)
         q = self.w_01 * a + self.w_10 * s + self.w_02 * a * a +  self.w_11 * a * s + self.w_20 * s * s
+        if np.isnan(q) or np.isinf(q):
+            print("overflow problem in calculating q:")
+            print(f"w_01: {self.w_01}    w_10: {self.w_10}    w_02: {self.w_20}    w_11: {self.w_11}    w_20: {self.w_20} ")
+        
+        # q regularization: we don't want q to grow too much
+        if q > 1E6:     q = 1E6
+        if q < -1E6:    q = -1E6
         return q
+
 
     def choose_action(self, state):
         # epsilon-greedy
         if np.random.uniform(0, 1) <= self.eps:
             action = np.random.uniform(0, state)
-            return action
-
-        a_opt = (self.w_11 * state + self.w_01) / (-2 * self.w_02)
-        # action (betting amount) must be between 0 and full capital (state):
-        if a_opt < 0:
-            return 0
-        elif a_opt > state:
-            return state
         else:
-            return a_opt
+            action = (self.w_11 * state + self.w_01) / (-2 * self.w_02)     # optimum a_opt from derivative
+        
+        # action (betting amount) must be between 0 and full capital (state):
+        if action < 0: action = 0
+        if action > state: action = state
+        
+        return action
         
     def update_weights_terminal(self, s, a, reward):
         # terminal state update
@@ -91,41 +97,41 @@ class SarsaLearner:
         [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
             [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
 
+
         
     
-EPISODES = 100
+# EPISODES = 100
+# if __name__ == '__main__':
+#     bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
+#                                         start_cap=100, max_cap=1E6, min_cap=1, max_steps=20)
 
-if __name__ == '__main__':
-    bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=100, max_cap=1E6, min_cap=1, max_steps=20)
-
-    sarsa_agent = SarsaLearner(bet_env, learning_rate=0.1, discount_factor=1.0,
-                            epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001)
+#     sarsa_agent = SarsaLearner(bet_env, learning_rate=0.1, discount_factor=1.0,
+#                             epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001)
     
-    state = bet_env.reset()
+#     state = bet_env.reset()
 
-    final_states = np.zeros(EPISODES)
+#     final_states = np.zeros(EPISODES)
 
-    for e in range(EPISODES):
-        states = np.zeros(bet_env.max_steps)
-        state = bet_env.reset()
-        action = sarsa_agent.choose_action(state)
+#     for e in range(EPISODES):
+#         states = np.zeros(bet_env.max_steps)
+#         state = bet_env.reset()
+#         action = sarsa_agent.choose_action(state)
 
-        for i in range(bet_env.max_steps):
-            next_state, next_reward, terminal = bet_env.step(action)
-            states.append(next_state)
+#         for i in range(bet_env.max_steps):
+#             next_state, next_reward, terminal = bet_env.step(action)
+#             states.append(next_state)
 
-            if terminal or i == bet_env.max_steps - 1:
-                final_states[e] = state
-                sarsa_agent.update_weights_terminal(state, action, reward)
-                break
-            else:
-                reward = next_reward
-                next_action = sarsa_agent.choose_action(state)
-                sarsa_agent.update_weights(state, action, reward, next_state, next_action)
-                state = next_state
-                action = next_action
+#             if terminal or i == bet_env.max_steps - 1:
+#                 final_states[e] = state
+#                 sarsa_agent.update_weights_terminal(state, action, reward)
+#                 break
+#             else:
+#                 reward = next_reward
+#                 next_action = sarsa_agent.choose_action(state)
+#                 sarsa_agent.update_weights(state, action, reward, next_state, next_action)
+#                 state = next_state
+#                 action = next_action
 
-        # plot states progression in one episode
+#         # plot states progression in one episode
     
-    # plot final states for all episodes
+#     # plot final states for all episodes

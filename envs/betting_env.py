@@ -31,7 +31,7 @@ class BettingEnvBinary():
         return self.cur_cap
 
     def step(self, bet_size):
-        err_msg_bet_sz = "The betting amount should be between 0.0 and current capital"
+        err_msg_bet_sz = f"The betting size {bet_size} should be between 0.0 and current capital {self.cur_cap}"
         assert 0 <= bet_size <= self.cur_cap, err_msg_bet_sz
 
         err_msg_terminated = "You are calling `step` after the episode termination."
