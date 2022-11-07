@@ -74,13 +74,22 @@ class SarsaLearner:
         if np.random.uniform(0, 1) <= self.eps:
             action = np.random.uniform(0, state)
         else:
-            action = (self.w_11 * state + self.w_01) / (-2 * self.w_02)     # optimum a_opt from derivative
+            action = self._optimal_action(state)
         
         # action (betting amount) must be between 0 and full capital (state):
         if action < 0: action = 0
         if action > state: action = state
         
         return action
+
+    def _optimal_action(self, state):
+        optimal_action = (self.w_11 * state + self.w_01) / (-2 * self.w_02) # optimum a_opt from derivative = 0
+
+        q_opt_a = self._q_val(state, optimal_action)
+        q_a_0 = self._q_val(state, 0)   #       q(s, 0) for a = 0, i.e. betting 0
+        q_a_s = self._q_val(state, state)   #   q(s, s) for acion = state, i.e. betting full
+
+        return max([(0, q_a_0), (state, q_a_s), (optimal_action, q_opt_a)], key=lambda t: t[1])[0]  # 
         
     def update_weights_terminal(self, s, a, reward):
         # terminal state update
@@ -96,8 +105,10 @@ class SarsaLearner:
         cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
         [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
             [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        self._adjust_epsilon()
 
-
+    def _adjust_epsilon(self):
+        if self.eps > self.eps_min: self.eps *= self.eps_dec
         
     
 # EPISODES = 100
