@@ -24,8 +24,11 @@ class BettingEnvBinary():
         self.cur_step = 0
         self.terminated = False
     
-    def reset(self):
-        self.cur_cap = self.start_cap
+    def reset(self, start_cap=None):
+        if start_cap is None:
+            self.cur_cap = self.start_cap
+        else:
+            self.cur_cap = start_cap
         self.cur_step = 0
         self.terminated = False
         return self.cur_cap
