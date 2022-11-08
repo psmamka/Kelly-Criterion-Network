@@ -8,21 +8,22 @@ except:
 from sarsa import SarsaLearner
 import matplotlib.pyplot as plt
 
-EPISODES = 1000
+EPISODES = 5000
 
 if __name__ == '__main__':
     bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=10, max_cap=10000, min_cap=1, max_steps=100)
+                                        start_cap=10, max_cap=1000, min_cap=1, max_steps=20)
 
-    sarsa_agent = SarsaLearner(bet_env, learning_rate=0.005, discount_factor=1.0,
-                            epsilon=0.5, epsilon_decay=0.99, epsilon_min=0.1)
+    sarsa_agent = SarsaLearner(bet_env, learning_rate=1E-9, discount_factor=1.0,
+                            epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.05,
+                            q_reg = 1E6, w_reg=10)
     
     state = bet_env.reset()
 
     final_states = np.zeros(EPISODES)
 
     for e in range(EPISODES):
-        state = bet_env.reset()
+        state = bet_env.reset(np.random.uniform(1, 100))
         states_list = [state]
         action = sarsa_agent.choose_action(state)
 
@@ -57,5 +58,6 @@ if __name__ == '__main__':
     
     plt.figure()
     plt.plot(s_arr, a_arr)
+    plt.ylim((-5, 100))
     plt.show()
 

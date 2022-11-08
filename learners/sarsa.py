@@ -42,19 +42,23 @@ except:
 
 class SarsaLearner:
     def __init__(self, env, learning_rate=0.1, discount_factor=1.0,
-                    epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001):
+                    epsilon=0.1, epsilon_decay=0.99, epsilon_min=0.001,
+                    q_reg=1E6, w_reg=1E3):
         self.env = env
         self.lr = learning_rate
         self.gamma = discount_factor
         self.eps = epsilon
         self.eps_dec = epsilon_decay
         self.eps_min = epsilon_min
+        self.q_reg = q_reg
+        self.w_reg = w_reg
 
         self._initialize_weights()
 
     def _initialize_weights(self):
         # w vector: [w_01, w_10, w_02, w_11, w_20]
-        self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 =  np.random.uniform(-1.0, 1.0, 5)
+        # self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 =  np.random.uniform(-0.01, 0.01, 5)
+        self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 = np.zeros(5)
 
     def _q_val(self, s, a):
         # quadratic form in state (s) and action (a)
@@ -67,7 +71,6 @@ class SarsaLearner:
         if q > 1E6:     q = 1E6
         if q < -1E6:    q = -1E6
         return q
-
 
     def choose_action(self, state):
         # epsilon-greedy
@@ -98,6 +101,8 @@ class SarsaLearner:
         cor = self.lr * (reward - self._q_val(s, a))
         [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
             [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        self._regularize_weights()
+        self._adjust_epsilon()
 
     def update_weights(self, s, a, reward, next_s, next_a):
         # non-terminal update
@@ -105,7 +110,21 @@ class SarsaLearner:
         cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
         [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
             [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        
+        self._regularize_weights()
         self._adjust_epsilon()
+
+    def _regularize_weights(self):
+        # for elm in [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20]:
+        #     if elm > lim: elm = lim
+        #     if elm < -lim: elm = -lim
+        arr = [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20]
+        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
+            list( map(lambda x: max(min(x, self.w_reg), -self.w_reg), arr) )
+
+    def _regularize_q(self, q_in):
+        return max(min(q_in, self.q_reg), -self.q_reg)
+        
 
     def _adjust_epsilon(self):
         if self.eps > self.eps_min: self.eps *= self.eps_dec
