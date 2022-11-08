@@ -35,11 +35,11 @@
 
 import numpy as np
 import sys
-try:
-    from .. envs import betting_env
-except:
-    sys.path.append('..')
-    from envs import betting_env
+# try:
+#     from .. envs import betting_env
+# except:
+#     sys.path.append('..')
+#     from envs import betting_env
 
 class SarsaLearnerQuadratic:
     '''Quadratic Implementation of Semigradient Sarsa where q is approximated using a second order polynomial in 
@@ -62,14 +62,16 @@ class SarsaLearnerQuadratic:
     def _initialize_weights(self):
         # w vector: [w_01, w_10, w_02, w_11, w_20]
         # self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 =  np.random.uniform(-0.01, 0.01, 5)
-        self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 = np.zeros(5)
+        # self.w_01, self.w_10, self.w_02, self.w_11, self.w_20 = np.zeros(5)
+        self.w_02, self.w_11, self.w_20 = np.zeros(3)
 
     def _q_val(self, s, a):
         # quadratic form in state (s) and action (a)
-        q = self.w_01 * a + self.w_10 * s + self.w_02 * a * a +  self.w_11 * a * s + self.w_20 * s * s
+        # q = self.w_01 * a + self.w_10 * s + self.w_02 * a * a +  self.w_11 * a * s + self.w_20 * s * s
+        q = self.w_02 * a * a +  self.w_11 * a * s + self.w_20 * s * s
         if np.isnan(q) or np.isinf(q):
             print("overflow problem in calculating q:")
-            print(f"w_01: {self.w_01}    w_10: {self.w_10}    w_02: {self.w_20}    w_11: {self.w_11}    w_20: {self.w_20} ")
+            print(f"w_02: {self.w_20}    w_11: {self.w_11}    w_20: {self.w_20} ")
         q = self._regularize_q(q)
         return q
 
@@ -87,7 +89,7 @@ class SarsaLearnerQuadratic:
         return action
 
     def _optimal_action(self, state):
-        optimal_action = (self.w_11 * state + self.w_01) / (-2 * self.w_02) # optimum a_opt from derivative = 0
+        optimal_action = (self.w_11 * state) / (-2 * self.w_02) # optimum a_opt from dd/da= 0
 
         q_opt_a = self._q_val(state, optimal_action)
         q_a_0 = self._q_val(state, 0)   #       q(s, 0) for a = 0, i.e. betting 0
@@ -100,8 +102,9 @@ class SarsaLearnerQuadratic:
         # w → w + alpha * [R_(t+1) - q(s(t), a(t), w(t))] * Grad_w(q(s, a, w))
         # Grad_w(q) = [a, s, a^2, s.a, s^2]
         cor = self.lr * (reward - self._q_val(s, a))
-        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
-            [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        # [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
+        #     [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        [self.w_02, self.w_11, self.w_20] = [self.w_02, self.w_11, self.w_20] + cor * np.array([a * a, s * a, s * s])
         self._regularize_weights()
         self._adjust_epsilon()
 
@@ -109,19 +112,17 @@ class SarsaLearnerQuadratic:
         # non-terminal update
         # w → w + alpha * [R_(t+1) + gamma * q(s(t+1), a(t+1), w(t)) - q(s(t), a(t), w(t))] * Grad_w
         cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
-        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
-            [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        # [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
+        #     [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
+        [self.w_02, self.w_11, self.w_20] = [self.w_02, self.w_11, self.w_20] + cor * np.array([a * a, s * a, s * s])
         
         self._regularize_weights()
         self._adjust_epsilon()
 
     def _regularize_weights(self):
-        # for elm in [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20]:
-        #     if elm > lim: elm = lim
-        #     if elm < -lim: elm = -lim
-        arr = [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20]
-        [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
-            list( map(lambda x: max(min(x, self.w_reg), -self.w_reg), arr) )
+        # arr = [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20]
+        arr = [self.w_02, self.w_11, self.w_20]
+        [self.w_02, self.w_11, self.w_20] = list( map(lambda x: max(min(x, self.w_reg), -self.w_reg), arr) )
 
     def _regularize_q(self, q_in):
         return max(min(q_in, self.q_reg), -self.q_reg)
