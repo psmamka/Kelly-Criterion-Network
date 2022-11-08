@@ -1,3 +1,7 @@
+# Training and evaluating Sarsa quadratic and linear learners to optimize the betting behavior in terms
+# of total rewards. The theoretical solution for a positive expectance, i.e. positive "edge", is to bet
+# the entire capital in each step. For explanation, see plots from binary_bet_theory.py.
+
 import numpy as np
 import sys
 try:    # for intellisense
@@ -14,12 +18,11 @@ bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss
 def train_sarsa_quadratic(bet_env):
     EPISODES = 5000
 
-    sarsa_agent = SarsaLearnerQuadratic(bet_env, learning_rate=1E-9, discount_factor=1.0,
+    sarsa_agent = SarsaLearnerQuadratic(bet_env, learning_rate=1E-7, discount_factor=1.0,
                             epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.05,
-                            q_reg = 1E5, w_reg=10)
+                            q_reg = 1E5, w_reg=100)
     
     state = bet_env.reset()
-
     final_states = np.zeros(EPISODES)
 
     for e in range(EPISODES):
@@ -43,23 +46,21 @@ def train_sarsa_quadratic(bet_env):
                 state = next_state
                 action = next_action
 
-        # plot states progression in one episode
         # print(states_list)
     
     # print final states for all episodes
     print(np.array2string(final_states, formatter={'float_kind':lambda x: "%.2f" % x})) 
-    print("Weights: ", f"{sarsa_agent.w_01:.2f}, {sarsa_agent.w_10:.2f}, {sarsa_agent.w_02:.2f}, {sarsa_agent.w_11:.2f}, {sarsa_agent.w_20:.2f}")
+    print("Quadratic Weights: ", f"{sarsa_agent.w_02:.2f}, {sarsa_agent.w_11:.2f}, {sarsa_agent.w_20:.2f}")
     return sarsa_agent
 
 def train_sarsa_linear(bet_env):
     EPISODES = 5000
 
     sarsa_agent = SarsaLearnerLinear(bet_env, learning_rate=1E-7, discount_factor=1.0,
-                            epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.01,
+                            epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.05,
                             q_reg = 1E6, w_reg=10)
     
     state = bet_env.reset()
-
     final_states = np.zeros(EPISODES)
 
     for e in range(EPISODES):
@@ -88,7 +89,7 @@ def train_sarsa_linear(bet_env):
     
     # print final states for all episodes
     print(np.array2string(final_states, formatter={'float_kind':lambda x: "%.2f" % x})) 
-    print("Weights: ", f"{sarsa_agent.w_01:.2f}, {sarsa_agent.w_10:.2f}")
+    print("Linear Weights: ", f"{sarsa_agent.w_01:.2f}, {sarsa_agent.w_10:.2f}")
     return sarsa_agent
 
 def plot_sarsa_action(sarsa_agent, title=None):
@@ -107,6 +108,6 @@ def plot_sarsa_action(sarsa_agent, title=None):
 agent_quadratic = train_sarsa_quadratic(bet_env)
 plot_sarsa_action(agent_quadratic, title="quadratic sarsa")
 
-agent_linear = train_sarsa_linear(bet_env)
-plot_sarsa_action(agent_linear, title="linear sarsa")
+# agent_linear = train_sarsa_linear(bet_env)
+# plot_sarsa_action(agent_linear, title="linear sarsa")
 
