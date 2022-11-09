@@ -5,7 +5,8 @@ import numpy as np
 
 class BettingEnvBinary():
     def __init__(self, win_pr, loss_pr, win_fr, loss_fr, 
-                    start_cap=1000, max_cap=1E6, min_cap=1, max_steps=None):
+                    start_cap=1000, max_cap=1E6, min_cap=1, max_steps=None,
+                    log_returns=False, log_regul=-10):
         
         if (win_pr + loss_pr != 1.0):
             pr_sum = win_pr + loss_pr
@@ -19,6 +20,9 @@ class BettingEnvBinary():
         self.max_cap = max_cap
         self.min_cap = min_cap
         self.max_steps = max_steps
+
+        self.log_returns = log_returns
+        self.log_regul = log_regul
 
         self.cur_cap = start_cap
         self.cur_step = 0
@@ -52,7 +56,11 @@ class BettingEnvBinary():
 
         self._check_termination()
 
-        return self.cur_cap, reward, self.terminated
+        if self.log_returns:
+            log_reward = self._get_log_reward(reward)
+            return self.cur_cap, log_reward, self.terminated
+        else:
+            return self.cur_cap, reward, self.terminated
 
     def _check_termination(self):
         self.terminated = bool(
@@ -60,5 +68,17 @@ class BettingEnvBinary():
             (self.min_cap is not None and self.cur_cap < self.min_cap) or 
             (self.max_steps is not None and self.cur_step >= self.max_steps)
         )
+
+    def _get_log_reward(self, r):
+        '''calculate logarithmic reward based on linear reward and current capital:
+        log(S_n+1) - log(S_n) = log(S_n+1 / S_n) = log((S_n + r) / S_n) = log(S_n+1 / (S_n+1 - r))'''
+        
+        log_rw = np.log(self.cur_cap / (self.cur_cap - r))
+
+        if log_rw == np.nan or log_rw == -np.Inf or log_rw < self.log_regul:
+            return self.log_regul
+        else:
+            return log_rw
+
 
         
