@@ -70,9 +70,11 @@ class BettingEnvBinary():
         )
 
     def _get_log_reward(self, r):
-        '''calculate logarithmic reward based on linear reward and current capital:
+        '''calculate logarithmic reward based on linear reward and current updated capital:
         log(S_n+1) - log(S_n) = log(S_n+1 / S_n) = log((S_n + r) / S_n) = log(S_n+1 / (S_n+1 - r))'''
         
+        if self.cur_cap < 1E-10: return self.log_regul
+
         log_rw = np.log(self.cur_cap / (self.cur_cap - r))
 
         if log_rw == np.nan or log_rw == -np.Inf or log_rw < self.log_regul:

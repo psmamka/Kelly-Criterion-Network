@@ -9,24 +9,24 @@ try:    # for intellisense
 except:
     sys.path.append('..')
     from envs import betting_env
-from sarsa import SarsaLearnerQuadratic, SarsaLearnerLinear
+from sarsa_polynomial import SarsaLearnerQuadratic, SarsaLearnerLinear
 import matplotlib.pyplot as plt
 
 bet_env = betting_env.BettingEnvBinary(win_pr=0.6, loss_pr=0.4, win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=10, max_cap=100, min_cap=1, max_steps=20)
+                                        start_cap=0.1, max_cap=1, min_cap=0.01, max_steps=20)
 
 def train_sarsa_quadratic(bet_env):
     EPISODES = 5000
 
-    sarsa_agent = SarsaLearnerQuadratic(bet_env, learning_rate=1E-7, discount_factor=1.0,
-                            epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.05,
+    sarsa_agent = SarsaLearnerQuadratic(bet_env, learning_rate=1E0, discount_factor=1.0,
+                            epsilon=1.0, epsilon_decay=0.9995, epsilon_min=0.01,
                             q_reg = 1E5, w_reg=100)
     
     state = bet_env.reset()
     final_states = np.zeros(EPISODES)
 
     for e in range(EPISODES):
-        state = bet_env.reset(np.random.uniform(1, 100))
+        state = bet_env.reset(np.random.uniform(0.01, 0.9))
         states_list = [state]
         action = sarsa_agent.choose_action(state)
 
@@ -37,12 +37,12 @@ def train_sarsa_quadratic(bet_env):
 
             if terminal or i == bet_env.max_steps - 1:
                 final_states[e] = next_state
-                sarsa_agent.update_weights_terminal(state, action, next_reward)
+                sarsa_agent.update_weights_terminal(state, action, next_reward, mult=1.0/(e + 1))   # 1/n adjusting
                 break
             else:
                 reward = next_reward
                 next_action = sarsa_agent.choose_action(next_state)
-                sarsa_agent.update_weights(state, action, reward, next_state, next_action)
+                sarsa_agent.update_weights(state, action, reward, next_state, next_action, mult=1.0/(e + 1))
                 state = next_state
                 action = next_action
 

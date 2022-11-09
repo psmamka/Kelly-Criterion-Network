@@ -97,21 +97,21 @@ class SarsaLearnerQuadratic:
 
         return max([(0, q_a_0), (state, q_a_s), (optimal_action, q_opt_a)], key=lambda t: t[1])[0]  # 
         
-    def update_weights_terminal(self, s, a, reward):
+    def update_weights_terminal(self, s, a, reward, mult=1.0):
         # terminal state update
         # w → w + alpha * [R_(t+1) - q(s(t), a(t), w(t))] * Grad_w(q(s, a, w))
         # Grad_w(q) = [a, s, a^2, s.a, s^2]
-        cor = self.lr * (reward - self._q_val(s, a))
+        cor = self.lr * mult * (reward - self._q_val(s, a))
         # [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
         #     [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
         [self.w_02, self.w_11, self.w_20] = [self.w_02, self.w_11, self.w_20] + cor * np.array([a * a, s * a, s * s])
         self._regularize_weights()
         self._adjust_epsilon()
 
-    def update_weights(self, s, a, reward, next_s, next_a):
+    def update_weights(self, s, a, reward, next_s, next_a, mult=1.0):
         # non-terminal update
         # w → w + alpha * [R_(t+1) + gamma * q(s(t+1), a(t+1), w(t)) - q(s(t), a(t), w(t))] * Grad_w
-        cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
+        cor = self.lr * mult * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
         # [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] = \
         #     [self.w_01, self.w_10, self.w_02, self.w_11, self.w_20] + cor * np.array([a, s, a * a, s * a, s * s])
         [self.w_02, self.w_11, self.w_20] = [self.w_02, self.w_11, self.w_20] + cor * np.array([a * a, s * a, s * s])
@@ -180,19 +180,19 @@ class SarsaLearnerLinear:
 
         return max([(0, q_a_0), (state, q_a_s)], key=lambda t: t[1])[0]  # 
         
-    def update_weights_terminal(self, s, a, reward):
+    def update_weights_terminal(self, s, a, reward, mult=1.0):
         # terminal state update
         # w → w + alpha * [R_(t+1) - q(s(t), a(t), w(t))] * Grad_w(q(s, a, w))
         # Grad_w(q) = [a, s, a^2, s.a, s^2]
-        cor = self.lr * (reward - self._q_val(s, a))
+        cor = self.lr * mult * (reward - self._q_val(s, a))
         [self.w_01, self.w_10] =  [self.w_01, self.w_10] + cor * np.array([a, s])
         self._regularize_weights()
         self._adjust_epsilon()
 
-    def update_weights(self, s, a, reward, next_s, next_a):
+    def update_weights(self, s, a, reward, next_s, next_a, mult=1.0):
         # non-terminal update
         # w → w + alpha * [R_(t+1) + gamma * q(s(t+1), a(t+1), w(t)) - q(s(t), a(t), w(t))] * Grad_w
-        cor = self.lr * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
+        cor = self.lr * mult * (reward + self.gamma * self._q_val(next_s, next_a) - self._q_val(s, a))
         [self.w_01, self.w_10] = [self.w_01, self.w_10] + cor * np.array([a, s])
         
         self._regularize_weights()
