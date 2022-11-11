@@ -27,10 +27,13 @@
 # 
 # E(log(s) | n-step) - log(s) = Σ n!/k!/(n-k)! * win_pr^k * loss_pr^(n-k) * log[ (1 + bet_fr * win_fr)^k * (1 - bet_fr * loss_fr)^(n-k) ]
 # 
-# 
+# Next we plot expected returns for another utility function, namely the square root of capital. In this case, the optimal
+# betting fraction ends up being somewhere in between the kelly criterion (for log expectation) and the full betting fraction
+# for linear expectation.
 
 import numpy as np
 from scipy.special import comb
+import matplotlib.pyplot as plt
 
 def bet_n_times_outcome(n, bet_fr, win_pr, win_fr=1.0, loss_fr=1.0, log_return=False):
     if type(bet_fr) is np.ndarray:
@@ -49,8 +52,21 @@ def bet_n_times_outcome(n, bet_fr, win_pr, win_fr=1.0, loss_fr=1.0, log_return=F
     
     return outcomes
 
+def bet_n_times_outcome_ufunc(n, bet_fr, win_pr, win_fr=1.0, loss_fr=1.0, util_func=lambda x: x):
+    '''generalized form of bet_n_times_outcome with a utility function passed in as an input'''
+    if type(bet_fr) is np.ndarray:
+        outcomes = np.zeros(bet_fr.shape)
+    else:
+        outcomes = 0
 
-if __name__ == "__main__":
+    for k in range(n + 1):
+        outcomes += comb(n, k, exact=True) * win_pr**k * (1 - win_pr)**(n-k) * \
+                        util_func((1 + bet_fr * win_fr)**k * (1 - bet_fr * loss_fr)**(n-k))
+    
+    return outcomes
+    
+
+def plot_lin_vs_log_util():
     bet_fr = np.linspace(start=0.0, stop=1.0, num=50, endpoint=False)
     steps = np.array([1, 2, 3, 5, 10])
     results_lin = np.zeros((steps.size, bet_fr.size))
@@ -63,8 +79,6 @@ if __name__ == "__main__":
     for idx, n in enumerate(steps):
         results_lin[idx, :] = bet_n_times_outcome(n, bet_fr, win_pr, win_fr, loss_fr, log_return=False)
         results_log[idx, :] = bet_n_times_outcome(n, bet_fr, win_pr, win_fr, loss_fr, log_return=True)
-    
-    import matplotlib.pyplot as plt
 
     plt.figure(figsize=(11, 5))
     for idx, n in enumerate(steps):
@@ -86,3 +100,29 @@ if __name__ == "__main__":
     plt.legend()
     plt.show()
 
+def plot_sqrt_util():
+    bet_fr = np.linspace(start=0.0, stop=1.0, num=50, endpoint=True)
+    steps = np.array([1, 2, 3, 5, 10])
+    results = np.zeros((steps.size, bet_fr.size))
+
+    win_pr = 0.6
+    win_fr = 1.0
+    loss_fr = 1.0
+
+    for idx, n in enumerate(steps):
+        results[idx, :] = bet_n_times_outcome_ufunc(n, bet_fr, win_pr, win_fr, loss_fr, util_func=lambda x: np.sqrt(x))
+    
+    plt.figure()
+    for idx, n in enumerate(steps):
+        plt.plot(bet_fr, results[idx, :], label=f"n={n}")
+
+    plt.ylim((0.5, 1.4))
+    plt.ylabel("Square Root Returns Expectation")
+    plt.xlabel("Betting Fractiong")
+    plt.legend()
+    plt.show()
+
+
+if __name__ == "__main__":
+    plot_lin_vs_log_util()
+    plot_sqrt_util()
