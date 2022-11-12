@@ -30,6 +30,11 @@
 # Next we plot expected returns for another utility function, namely the square root of capital. In this case, the optimal
 # betting fraction ends up being somewhere in between the kelly criterion (for log expectation) and the full betting fraction
 # for linear expectation.
+# 
+# Another spacial case of interest is the utility function for the expected profits for a fund manager, which we refer to
+# as HFM(x). It is customary for private funds to charge a maintanence fee as a fixed ratio of the capital managed, as well
+# as a larger percentage of the annual profits, combined with certain "high-water mark" condition. An interesting case
+# would be when HFM results in trades despite negative expectancy. 
 
 import numpy as np
 from scipy.special import comb
@@ -64,7 +69,6 @@ def bet_n_times_outcome_ufunc(n, bet_fr, win_pr, win_fr=1.0, loss_fr=1.0, util_f
                         util_func((1 + bet_fr * win_fr)**k * (1 - bet_fr * loss_fr)**(n-k))
     
     return outcomes
-    
 
 def plot_lin_vs_log_util():
     bet_fr = np.linspace(start=0.0, stop=1.0, num=50, endpoint=False)
@@ -122,7 +126,46 @@ def plot_sqrt_util():
     plt.legend()
     plt.show()
 
+def hfm_util(x_new, x_old, hwm=None, fix_ratio=0.01, prof_ratio=0.10):
+    '''the hedge fund manager's utility function, for increasing capital from x_old to x_new, in the presence of
+    a "high-water-mark", with given fixed ratio fees and performance ratio charges applied to invested funds'''
+    if hwm is None:
+        pvt = x_old # pivot point
+    else:
+        pvt = max(hwm, x_old)
+    
+    total_fees = fix_ratio * x_new + prof_ratio * np.maximum(np.zeros(len(x_new)), x_new - pvt)
+    return total_fees
+
+def plot_hfm_util_single_period():
+    bet_fr = np.linspace(start=0.0, stop=1.0, num=50, endpoint=True)
+    results_pos = np.zeros(bet_fr.size) # positive expectancy: 60% win in double-or-nothing
+    results_neg = np.zeros(bet_fr.size) # negative expectancy: 40% win in double-or-nothing
+
+    win_fr = 1.0
+    loss_fr = 1.0
+    util_func=lambda x: hfm_util(x, 1, 1, fix_ratio=0.01, prof_ratio=0.10)
+
+    results_pos = bet_n_times_outcome_ufunc(1, bet_fr, 0.6, win_fr, loss_fr, util_func=util_func)
+    results_neg = bet_n_times_outcome_ufunc(1, bet_fr, 0.4, win_fr, loss_fr, util_func=util_func)
+
+    plt.figure(figsize=(11, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(bet_fr, results_pos)
+    plt.xlabel("Betting Fractiong")
+    plt.ylabel("HFM Returns Expectation")
+    plt.ylim((0, 0.1))
+    plt.title("HFM Returns:\n60% Win in Double-or-Nothing ")
+    plt.subplot(1, 2, 2)
+    plt.plot(bet_fr, results_neg)
+    plt.xlabel("Betting Fractiong")
+    plt.ylabel("HFM Returns Expectation")
+    plt.ylim((0, 0.1))
+    plt.title("HFM Returns:\n40% Win in Double-or-Nothing ")
+    plt.show()
+
 
 if __name__ == "__main__":
     plot_lin_vs_log_util()
     plot_sqrt_util()
+    plot_hfm_util_single_period()
