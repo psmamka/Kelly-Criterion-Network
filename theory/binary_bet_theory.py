@@ -137,35 +137,52 @@ def hfm_util(x_new, x_old, hwm=None, fix_ratio=0.01, prof_ratio=0.10):
     total_fees = fix_ratio * x_new + prof_ratio * np.maximum(np.zeros(len(x_new)), x_new - pvt)
     return total_fees
 
-def plot_hfm_util_single_period():
+def hfc_util(x_new, x_old, hwm=None, fix_ratio=0.01, prof_ratio=0.10):
+    '''A hedge-fund client's utility function; linear returns and taking into effect the fixed and performance
+    fees. Can be combined with any other utility func.'''
+    if hwm is None:
+        pvt = x_old # pivot point
+    else:
+        pvt = max(hwm, x_old)
+    
+    total_fees = fix_ratio * x_new + prof_ratio * np.maximum(np.zeros(len(x_new)), x_new - pvt)
+    return x_new - x_old - total_fees
+
+def plot_hf_util_single_period():
     bet_fr = np.linspace(start=0.0, stop=1.0, num=50, endpoint=True)
     results_pos = np.zeros(bet_fr.size) # positive expectancy: 60% win in double-or-nothing
     results_neg = np.zeros(bet_fr.size) # negative expectancy: 40% win in double-or-nothing
 
     win_fr = 1.0
     loss_fr = 1.0
-    util_func=lambda x: hfm_util(x, 1, 1, fix_ratio=0.01, prof_ratio=0.10)
+    util_func_manager=lambda x: hfm_util(x, 1, 1, fix_ratio=0.01, prof_ratio=0.10)
+    util_func_client=lambda x: hfc_util(x, 1, 1, fix_ratio=0.01, prof_ratio=0.10)
 
-    results_pos = bet_n_times_outcome_ufunc(1, bet_fr, 0.6, win_fr, loss_fr, util_func=util_func)
-    results_neg = bet_n_times_outcome_ufunc(1, bet_fr, 0.4, win_fr, loss_fr, util_func=util_func)
+    # results for manager and client, with positive and negative "edge"
+    res_manager_pos = bet_n_times_outcome_ufunc(1, bet_fr, 0.6, win_fr, loss_fr, util_func=util_func_manager)
+    res_client_pos = bet_n_times_outcome_ufunc(1, bet_fr, 0.6, win_fr, loss_fr, util_func=util_func_client)
+    res_manager_neg = bet_n_times_outcome_ufunc(1, bet_fr, 0.4, win_fr, loss_fr, util_func=util_func_manager)
+    res_client_neg = bet_n_times_outcome_ufunc(1, bet_fr, 0.4, win_fr, loss_fr, util_func=util_func_client)
 
     plt.figure(figsize=(11, 5))
     plt.subplot(1, 2, 1)
-    plt.plot(bet_fr, results_pos)
-    plt.xlabel("Betting Fractiong")
-    plt.ylabel("HFM Returns Expectation")
-    plt.ylim((0, 0.1))
-    plt.title("HFM Returns:\n60% Win in Double-or-Nothing ")
+    plt.plot(bet_fr, res_manager_pos, bet_fr, res_client_pos)
+    plt.xlabel("Investment Fractiong")
+    plt.ylabel("HF Returns Expectation")
+    # plt.ylim((0, 0.1))
+    plt.title("HF Returns:\n60% Win Double-or-Nothing ")
+    plt.legend(["Manager", "Client"])
     plt.subplot(1, 2, 2)
-    plt.plot(bet_fr, results_neg)
-    plt.xlabel("Betting Fractiong")
-    plt.ylabel("HFM Returns Expectation")
-    plt.ylim((0, 0.1))
-    plt.title("HFM Returns:\n40% Win in Double-or-Nothing ")
+    plt.plot(bet_fr, res_manager_neg, bet_fr, res_client_neg)
+    plt.xlabel("Investment Fractiong")
+    plt.ylabel("HF Returns Expectation")
+    # plt.ylim((0, 0.1))
+    plt.title("HF Returns:\n40% Win Double-or-Nothing ")
+    plt.legend(["Manager", "Client"])
     plt.show()
 
 
 if __name__ == "__main__":
-    plot_lin_vs_log_util()
-    plot_sqrt_util()
-    plot_hfm_util_single_period()
+    # plot_lin_vs_log_util()
+    # plot_sqrt_util()
+    plot_hf_util_single_period()
