@@ -14,9 +14,10 @@ import matplotlib.pyplot as plt
 def build_single_hidden_nn(num_inputs=1, num_outputs=1, hid_size=20):
     model = nn.Sequential(
                 nn.Linear(num_inputs, hid_size),
-                nn.PReLU(num_parameters=1),
+                nn.ReLU(),
+                # nn.PReLU(num_parameters=1),
                 nn.Linear(hid_size, num_outputs),
-                nn.PReLU(num_parameters=1)
+                # nn.PReLU(num_parameters=1)
             )
 
     return model
@@ -25,11 +26,12 @@ def build_double_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10]):
 
     model = nn.Sequential(
                 nn.Linear(num_inputs, hid_size[0]),
-                nn.PReLU(num_parameters=1),
+                nn.ReLU(),
+                # nn.PReLU(num_parameters=1),
                 nn.Linear(hid_size[0], hid_size[1]),
-                nn.PReLU(num_parameters=1),
+                nn.ReLU(),
+                # nn.PReLU(num_parameters=1),
                 nn.Linear(hid_size[1], num_outputs),
-                nn.PReLU(num_parameters=1)
             )
 
     return model
@@ -94,7 +96,7 @@ def plot_results(train_loss_hist, valid_loss_hist, num_epochs=100):
     plt.ylabel("Loss")
     plt.legend(["Training", "Validation"])
 
-    x_test = np.sort(np.random.uniform(low=0, high=10, size=100))
+    x_test = np.sort(np.random.uniform(low=0.01, high=10, size=100))
     y_test = get_log_util(x_test, x_reg=1E-10)
     y_pred = model(torch.tensor(x_test.reshape(100, 1), dtype=torch.float32))[:, 0]
 
@@ -115,16 +117,17 @@ if __name__ == "__main__":
     torch.manual_seed(1)
 
     num_tr = 100
-    batch_size = 5
+    batch_size = 1
+    start_pt = 0.01
 
-    # model = build_single_hidden_nn(num_inputs=1, num_outputs=1, hid_size=20)
+    # model = build_single_hidden_nn(num_inputs=1, num_outputs=1, hid_size=30)
 
-    model = build_double_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10])
+    model = build_double_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[15, 15])
 
-    train_dl, x_valid, y_valid = build_nn_dataset(num_tr=num_tr, start_pt=0.01, batch_size=batch_size)
+    train_dl, x_valid, y_valid = build_nn_dataset(num_tr=num_tr, start_pt=start_pt, batch_size=batch_size)
 
     train_loss_hist, valid_loss_hist = train_nn_model_supervised(model, train_dl, x_valid, y_valid, \
-                                                                num_tr=num_tr, batch_size=batch_size, lr=0.001, num_epochs=100)
+                                                                num_tr=num_tr, batch_size=batch_size, lr=0.01, num_epochs=100)
 
     print(f"train loss: {train_loss_hist} \n validation loss: {valid_loss_hist}")
     
