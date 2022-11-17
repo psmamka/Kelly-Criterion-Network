@@ -1,6 +1,6 @@
 # The simplest case of a neural network used to estimate the utility of a given betting/investment policy
-# 
-# input: investment fraction
+# Deterministic Utility Function
+# input: investment/betting fraction
 # output: estimated utility for investment outcome
 
 import sys
