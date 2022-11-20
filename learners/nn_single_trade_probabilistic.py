@@ -39,7 +39,7 @@ def build_multi_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10]):
 
 def build_nn_stoch_train_set(prob_arr, outcome_arr, num_tr=100, start_pt=0.1, batch_size=1):
     x_train = np.linspace(start=start_pt, stop=10.0, num=num_tr, endpoint=True).reshape(num_tr, 1)
-    y_train = torch.tensor(get_stoch_outcome_y(x_train, prob_arr, outcome_arr))
+    y_train = torch.tensor(get_stoch_outcome_y(x_train, prob_arr, outcome_arr), dtype=torch.float32)
     x_train = torch.tensor(x_train, dtype=torch.float32)
 
     train_dataset = TensorDataset(x_train, y_train)
@@ -55,7 +55,7 @@ def get_stoch_outcome_y(x_in, prob_arr, outcome_arr):
     if p_arr.shape != o_arr.shape: raise Exception(f"Input shapes not compatible: {p_arr.shape} vs {o_arr.shape}")
     # generate uniform randoms:
     rand_arr = np.random.uniform(low=0.0, high=1.0, size=len(x_in))
-    print(rand_arr, rand_arr.sum())
+    # print(rand_arr, rand_arr.sum())
     # cumulative probabilities
     p_cum = np.cumsum(p_arr)
     # print(p_cum)
@@ -64,22 +64,35 @@ def get_stoch_outcome_y(x_in, prob_arr, outcome_arr):
         p_idx = np.nonzero(p_cum > rand_arr[idx])[0][0]
         # investment outcome based on investment fraction and the stochastic probabilities
         y_train[idx] = (1 - x) + x * o_arr[p_idx]
-    print(y_train)
+    # print(y_train)
     # convert to log-utility
-    y_train = get_log_util(y_train, x_reg=1E-10)
+    y_train = get_log_util(y_train, x_reg=1E-20)
     return y_train
 
-def build_nn_valid_set(num_val=35, start_pt=0.1):
+def get_determ_outcome_y(x_in, prob_arr, outcome_arr):
+    y = np.zeros(len(x_in))
+    p_arr, o_arr = np.array(prob_arr), np.array(outcome_arr)
+    for idx, x in enumerate(x_in):
+        # print((1-x) * np.ones(len(o_arr)) + x * o_arr)
+        y[idx] = np.sum(p_arr * get_log_util((1-x) * np.ones(len(o_arr)) + x * o_arr, x_reg = 1E-20))
+    return y
+
+def build_nn_valid_set(prob_arr, outcome_arr, num_val=35, start_pt=0.1):
     x_valid = np.linspace(start=start_pt, stop=10.0, num=num_val, endpoint=True).reshape(num_val, 1)
-    y_valid = torch.tensor(get_log_util(x_valid, x_reg=1E-100), dtype=torch.float32)
+    y_valid = torch.tensor(get_determ_outcome_y(x_valid, prob_arr, outcome_arr), dtype=torch.float32)
     x_valid = torch.tensor(x_valid, dtype=torch.float32)
     return x_valid, y_valid
 
-def get_log_util(x, x_reg=1E-10):
-    y = np.log(np.maximum(x, x_reg))
+def get_log_util(x, x_reg=None, y_reg=None):
+    if x_reg is not None:
+        y = np.log(np.maximum(x, x_reg))
+    elif y_reg is not None:
+        y = np.maximum(np.log(x), y_reg)
+    else:
+        y = np.log(x)
     return y
 
-def train_nn_probabilistic(model, x_valid, y_valid, num_tr=100, batch_size=5, lr=0.002, num_epochs=100):
+def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=100, batch_size=5, lr=0.002, num_epochs=100):
 
     nn.init.xavier_uniform_(model[0].weight)
 
@@ -89,16 +102,76 @@ def train_nn_probabilistic(model, x_valid, y_valid, num_tr=100, batch_size=5, lr
     loss_fn = nn.L1Loss()  # L1 dist for probabilistic training
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
+    for epc in range(num_epochs):
+        # in each epoch new sampling of the training dataset is created
+        train_dl = build_nn_stoch_train_set(prob_arr, outcome_arr, num_tr=100, start_pt=0.1, batch_size=batch_size)
+        for x_b, y_b in train_dl:   # bathces
+            pred = model(x_b)[:, 0]
+            loss_tr = loss_fn(pred, y_b.squeeze())
+            loss_tr.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            train_loss_hist[epc] += loss_tr.item()
+
+        train_loss_hist[epc] /= num_tr / batch_size
+        pred = model(x_valid)[:, 0]
+        loss_v = loss_fn(pred, y_valid.squeeze())
+        valid_loss_hist[epc] += loss_v.item()
+
+    return train_loss_hist, valid_loss_hist
+
+def plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr, num_epochs=100):
+
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(np.arange(num_epochs) + 1, train_loss_hist)
+    plt.plot(np.arange(num_epochs) + 1, valid_loss_hist)
+    plt.title("NN Performance\nProbabilistic Training")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend(["Training", "Validation"])
+
+    x_test = np.sort(np.random.uniform(low=0.01, high=0.9, size=100))
+    y_test = get_determ_outcome_y(x_test, prob_arr, outcome_arr)
+    y_pred = model(torch.tensor(x_test.reshape(100, 1), dtype=torch.float32))[:, 0]
+
+    plt.subplot(1, 2, 2)
+    plt.plot(x_test[:], y_pred.detach().numpy()[:])
+    plt.plot(x_test[:], y_test[:])
+    plt.title("Model vs Theory")
+    plt.xlabel("Input X to Model")
+    plt.ylabel("Logarithmic Utility Function")
+    plt.legend(["Model", "Theory"])
+
+    plt.show()
+
 
 if __name__ == "__main__":
     
-    np.random.seed(1)
+    np.random.seed(3)
     torch.manual_seed(1)
 
-    # model = build_multi_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10])
+    prob_arr = [0.4, 0.6]
+    outcome_arr = [0.0, 2.0]
+    num_epochs = 200
+    batch_size = 10
+    lr = 0.0001
 
-    # testing stochastic outcome: 50-50 Double or Nothing log utility, 10 times.
-    y = get_stoch_outcome_y(np.ones(5), [0.5, 0.5], [2.0, 0.0])
-    print(y)
+    model = build_multi_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10])
+
+    x_valid, y_valid = build_nn_valid_set(prob_arr, outcome_arr, num_val=35, start_pt=0.1)
+
+    train_loss_hist, valid_loss_hist = train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, \
+                                                            num_tr=100, batch_size=batch_size, lr=lr, num_epochs=num_epochs)
+
+    print("Probabilistic Neural Network Training.")
+    print(f"train loss: {train_loss_hist} \n validation loss: {valid_loss_hist}")
+
+    plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr, num_epochs=num_epochs)
+
+    # # testing stochastic outcome: 50-50 Double or Nothing log utility, 10 times.
+    # y = get_stoch_outcome_y(np.ones(10), [0.5, 0.5], [2.0, 0.0])
+    # print(y)
 
     # print(model)
