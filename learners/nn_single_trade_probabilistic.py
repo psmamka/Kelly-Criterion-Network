@@ -80,11 +80,11 @@ def get_determ_outcome_y(x_in, prob_arr, outcome_arr):
         y[idx] = np.sum(p_arr * get_log_util((1-x) * np.ones(len(o_arr)) + x * o_arr, x_reg = 1E-20))
     return y
 
-def build_nn_valid_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.99, num_val=35):
+def build_nn_deterministic_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.99, num_val=35):
     x_valid = np.linspace(start=start_pt, stop=stop_pt, num=num_val, endpoint=True).reshape(num_val, 1)
     y_valid = get_determ_outcome_y(x_valid, prob_arr, outcome_arr)
 
-    print(x_valid, y_valid)
+    # print(x_valid, y_valid)
     return torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
 
 def get_log_util(x, x_reg=None, y_reg=None):
@@ -96,23 +96,28 @@ def get_log_util(x, x_reg=None, y_reg=None):
         y = np.log(x)
     return y
 
-def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=100, batch_size=5, lr=0.002, num_epochs=100):
+def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=100, batch_size=5, \
+                            lr=0.002, num_epochs=100, epoch_prog=100, stoch_mode=True):
 
     nn.init.xavier_uniform_(model[0].weight)
 
     train_loss_hist = np.zeros(num_epochs)
     valid_loss_hist = np.zeros(num_epochs)
 
-    loss_fn = nn.SmoothL1Loss()  # L1/MSE/BCE/SmoothL1 loss for probabilistic training
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    # loss_fn = nn.MSELoss()  # L1Loss/MSELoss/SmoothL1Loss for probabilistic training
+    # loss_fn = nn.L1Loss()
+    loss_fn = nn.SmoothL1Loss()
 
-    # train_dl = build_nn_stoch_train_set(prob_arr, outcome_arr,start_pt=0.0, stop_pt=0.99, num_tr=num_tr, batch_size=batch_size)
-    # x_train, y_train = build_nn_valid_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.99, num_val=100)
-    # train_dataset = TensorDataset(x_train, y_train)
-    # train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    if not stoch_mode:  # Deterministic Training
+        x_train, y_train = build_nn_deterministic_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.90, num_val=100)
+        train_dataset = TensorDataset(x_train, y_train)
+        train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     for epc in range(num_epochs):
-        # in each epoch new sampling of the training dataset is created
-        train_dl = build_nn_stoch_train_set(prob_arr, outcome_arr,start_pt=0.0, stop_pt=0.99, num_tr=num_tr, batch_size=batch_size)
+        if stoch_mode: # Stochastic: in each epoch new sampling of the training dataset is created
+            train_dl = build_nn_stoch_train_set(prob_arr, outcome_arr,start_pt=0.0, stop_pt=0.90, num_tr=num_tr, batch_size=batch_size)
         for x_b, y_b in train_dl:   # bathces
             pred = model(x_b)[:, 0]
             loss_tr = loss_fn(pred, y_b.squeeze())
@@ -126,6 +131,9 @@ def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_t
         pred = model(x_valid)[:, 0]
         loss_v = loss_fn(pred, y_valid.squeeze())
         valid_loss_hist[epc] += loss_v.item()
+
+        if epc % epoch_prog == 0:
+            print(f"Epoch: {epc} | Training Loss: {train_loss_hist[epc]} | Validation Loss: {valid_loss_hist[epc]}")
 
     return train_loss_hist, valid_loss_hist
 
@@ -162,19 +170,28 @@ if __name__ == "__main__":
 
     prob_arr = [0.4, 0.6]
     outcome_arr = [0.0, 2.0]
-    num_epochs = 100
-    num_tr=500
-    batch_size = 10
-    lr = 0.0002
+    stoch_mode = False
+    if stoch_mode:
+        num_epochs = 10_000
+        epoch_prog = 100
+        num_tr=100
+        batch_size = 10
+        # lr = 0.020   # MSE
+        lr = 0.00002  # L1
+    else:
+        num_epochs = 1500
+        epoch_prog = 100
+        num_tr=100
+        batch_size = 2
+        # lr = 0.020   # MSE
+        lr = 0.0001  # L1
 
-    model = build_multi_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[20, 20])
+    model = build_multi_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[20, 30])   # print(model)
 
-    print(model)
+    x_valid, y_valid = build_nn_deterministic_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.90, num_val=65)
 
-    x_valid, y_valid = build_nn_valid_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.99, num_val=35)
-
-    train_loss_hist, valid_loss_hist = train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, \
-                                                            num_tr=num_tr, batch_size=batch_size, lr=lr, num_epochs=num_epochs)
+    train_loss_hist, valid_loss_hist = train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=num_tr, \
+                                            batch_size=batch_size, lr=lr, num_epochs=num_epochs, epoch_prog=epoch_prog, stoch_mode=stoch_mode)
 
     print("Probabilistic Neural Network Training.")
     print(f"train loss: {train_loss_hist} \n validation loss: {valid_loss_hist}")
