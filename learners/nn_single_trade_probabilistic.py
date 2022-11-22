@@ -104,9 +104,9 @@ def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_t
     train_loss_hist = np.zeros(num_epochs)
     valid_loss_hist = np.zeros(num_epochs)
 
-    # loss_fn = nn.MSELoss()  # L1Loss/MSELoss/SmoothL1Loss for probabilistic training
+    loss_fn = nn.MSELoss()  # L1Loss/MSELoss/SmoothL1Loss for probabilistic training
     # loss_fn = nn.L1Loss()
-    loss_fn = nn.SmoothL1Loss()
+    # loss_fn = nn.SmoothL1Loss()
 
     # optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -137,13 +137,13 @@ def train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_t
 
     return train_loss_hist, valid_loss_hist
 
-def plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr, num_epochs=100):
+def plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr, lr=1E-4, num_epochs=100, stoch_mode=True):
 
     plt.figure(figsize=(10, 5))
     plt.subplot(1, 2, 1)
     plt.plot(np.arange(num_epochs) + 1, train_loss_hist)
     plt.plot(np.arange(num_epochs) + 1, valid_loss_hist)
-    plt.title("NN Performance\nProbabilistic Training")
+    plt.title(f"NN Performance\nTraining Mode: {'Probabilistic' if stoch_mode else 'Deterministic'}")
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.legend(["Training", "Validation"])
@@ -155,8 +155,8 @@ def plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr,
     plt.subplot(1, 2, 2)
     plt.plot(x_test[:], y_pred.detach().numpy()[:])
     plt.plot(x_test[:], y_test[:])
-    plt.title("Model vs Theory")
-    plt.xlabel("Input X to Model")
+    plt.title(f"Model vs Theory\nLearning Rate: {lr}")
+    plt.xlabel("Input X to Model: Investment Fraction")
     plt.ylabel("Logarithmic Utility Function")
     plt.legend(["Model", "Theory"])
 
@@ -170,14 +170,14 @@ if __name__ == "__main__":
 
     prob_arr = [0.4, 0.6]
     outcome_arr = [0.0, 2.0]
-    stoch_mode = False
+    stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
     if stoch_mode:
-        num_epochs = 10_000
-        epoch_prog = 100
+        num_epochs = 20_000
+        epoch_prog = 200
         num_tr=100
-        batch_size = 10
-        # lr = 0.020   # MSE
-        lr = 0.00002  # L1
+        batch_size = 5
+        lr = 0.0001   # MSE
+        # lr = 0.00002  # L1
     else:
         num_epochs = 1500
         epoch_prog = 100
@@ -191,12 +191,14 @@ if __name__ == "__main__":
     x_valid, y_valid = build_nn_deterministic_set(prob_arr, outcome_arr, start_pt=0.0, stop_pt=0.90, num_val=65)
 
     train_loss_hist, valid_loss_hist = train_nn_probabilistic(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=num_tr, \
-                                            batch_size=batch_size, lr=lr, num_epochs=num_epochs, epoch_prog=epoch_prog, stoch_mode=stoch_mode)
+                                                batch_size=batch_size, lr=lr, num_epochs=num_epochs, epoch_prog=epoch_prog, \
+                                                stoch_mode=stoch_mode)
 
     print("Probabilistic Neural Network Training.")
     print(f"train loss: {train_loss_hist} \n validation loss: {valid_loss_hist}")
 
-    plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr, num_epochs=num_epochs)
+    plot_results(train_loss_hist, valid_loss_hist, model, prob_arr, outcome_arr,\
+                lr=lr, num_epochs=num_epochs, stoch_mode=stoch_mode)
 
     # # testing stochastic outcome: 50-50 Double or Nothing log utility, 10 times.
     # y = get_stoch_outcome_y(np.ones(10), [0.5, 0.5], [2.0, 0.0])
