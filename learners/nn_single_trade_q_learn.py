@@ -17,6 +17,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 
 def build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[10, 10]):
@@ -62,12 +63,68 @@ def log_util(x, x_reg=None, y_reg=None):
         y = np.log(x)
     return y
 
-def train_nn(model, x_valid, y_valid, prob_arr, outcome_arr, num_tr=100, batch_size=5, \
-                            lr=0.002, num_epochs=100, epoch_prog=100, stoch_mode=True): 
-    train_loss_hist = np.zeros(num_epochs)
-    valid_loss_hist = np.zeros(num_epochs)
+def get_stoch_next_state(state, action, prob_arr, outcome_arr):
+    # will use comulative probs
+    return next_st
+
+def get_state_change_reward(state, next_st, util_func):
+    reward = util_func(next_st) - util_func(state)
+    return reward
+
+def train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0], ac_range=[0, 0.99],\
+                            epsilon=0.05, lr=0.002, num_episodes=1000, epis_prog=100, stoch_mode=True): 
+    nn.init.xavier_uniform_(model[0].weight)
+    train_loss_hist = np.zeros(num_episodes)
+    valid_loss_hist = np.zeros(num_episodes)
+    states_arr = np.zeros(num_episodes + 1)
+    actions_arr = np.zeros(num_episodes)
+    rewards_arr = np.zeros(num_episodes)
+    states_arr[0] = np.random.uniform(low=st_range[0], high=st_range[1])    # initialize state
+
+    loss_fn = nn.MSELoss()  # MSELoss/L1Loss/SmoothL1Loss
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    if not stoch_mode:  # Deterministic Training
+        x_train, y_train = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func,\
+                                st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+        # train_dataset = TensorDataset(x_train, y_train)
+        # train_dl = DataLoader(train_dataset, batch_size=1, shuffle=True)
+    for episode in range(num_episodes):
+        if stoch_mode:
+            state = states_arr[episode]
+            action = select_action(model, state, ac_range=ac_range, epsilon=epsilon)
+            pred = model(torch.tensor([state, action], dtype=torch.float32))[:, 0]
+            next_st = get_stoch_next_state(state, action, prob_arr, outcome_arr)
+            reward = get_state_change_reward(state, next_st, util_func=util_func)
+            states_arr[episode + 1] = next_st
+            rewards_arr[episode] = reward
+            loss_tr = loss_fn(pred, torch.tensor(reward, dtype=torch.float32))
+            loss_tr.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+
+
 
     return train_loss_hist, valid_loss_hist
+
+def select_action(model, state, ac_range=[0.0, 1.0], epsilon=0.05, ac_granul=101):
+    # ac_granul: granularity of the action space for q determination
+    s_arr = np.array([state] * ac_granul)
+    a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
+    sa_arr = np.vstack((s_arr, a_arr)).transpose()  # rows: ac_granul, columns: 2   print(sa_arr.shape)
+    sa_tensor = torch.tensor(sa_arr, dtype=torch.float32)
+    # q_arr = np.zeros(ac_granul)
+    r = np.random.uniform(low=0, high=1)
+    if r < epsilon:
+        action = np.random.uniform(low=ac_range[0], high=ac_range[1])
+    else:
+        with torch.no_grad():
+            q_arr = model(sa_tensor).detach().numpy()[:]
+            idx = np.argmax(q_arr)
+            action=  a_arr[idx]
+    return action
 
 
 if __name__ == "__main__":
@@ -78,10 +135,18 @@ if __name__ == "__main__":
     prob_arr = [0.4, 0.6]
     outcome_arr = [0.0, 2.0]
     stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
-    util_func = lambda x: log_util(x, y_reg=-10)
+    util_func = lambda x: log_util(x, y_reg=-20)
 
-    # model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[20, 30])   # print(model)
+    model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[20, 30])   # print(model)
 
     x_valid, y_valid = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func, \
                                 st_range=[0.0, 1.0], ac_range=[0, 1], num_st=20, num_ac=20)
 
+    # for i in range(20):   # test action selection
+    #     action = select_action(model, 0.5, ac_range=[0.0, 1.0], epsilon=0.5, ac_granul=101)
+    #     print(action)
+
+    # for i in range(20):
+    #     next_st = np.random.uniform()
+    #     reward = get_state_change_reward(0.5, next_st, util_func=util_func)
+    #     print(next_st, reward, np.log(next_st/0.5))
