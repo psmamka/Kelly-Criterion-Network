@@ -42,7 +42,7 @@ def build_qnn_determ_set(prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0], 
     x_valid = np.array(list(zip(ss.reshape(num_st * num_ac,), aa.reshape(num_st * num_ac,))))
 
     y_valid = get_determ_reward_y(x_valid, prob_arr, outcome_arr, util_func)
-    print(x_valid, y_valid)
+    # print(x_valid, y_valid)
     return torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
 
 def get_determ_reward_y(x_in, prob_arr, outcome_arr, util_func):
@@ -64,7 +64,16 @@ def log_util(x, x_reg=None, y_reg=None):
     return y
 
 def get_stoch_next_state(state, action, prob_arr, outcome_arr):
-    # will use comulative probs
+    p_arr, o_arr = np.array(prob_arr), np.array(outcome_arr)    # convert types
+    if p_arr.shape != o_arr.shape: raise Exception(f"Input shapes not compatible: {p_arr.shape} vs {o_arr.shape}")
+    # cumulative probabilities
+    p_cum = np.cumsum(p_arr)
+    r = np.random.uniform(low=0.0, high=1.0)
+    # outcome index based on random r and cumul probabs
+    idx = np.nonzero(p_cum > r)[0][0]       # print(idx)
+    # next state based on: original state, action (risked cap) and stoch outcome:
+    #        ↓ amount not risked ↓  +   ↓ amount risked * outcome ↓
+    next_st =   (state - action)    +   action * o_arr[idx]
     return next_st
 
 def get_state_change_reward(state, next_st, util_func):
@@ -150,3 +159,10 @@ if __name__ == "__main__":
     #     next_st = np.random.uniform()
     #     reward = get_state_change_reward(0.5, next_st, util_func=util_func)
     #     print(next_st, reward, np.log(next_st/0.5))
+
+    # st_arr = np.zeros(100)
+    # for i in range(100):
+    #     next_st = get_stoch_next_state(state=1.0, action=0.5, prob_arr=prob_arr, outcome_arr=outcome_arr)
+    #     st_arr[i] = next_st
+    # print(st_arr.sum())
+
