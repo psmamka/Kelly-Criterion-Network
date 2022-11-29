@@ -81,14 +81,14 @@ def get_state_change_reward(state, next_st, util_func):
     return reward
 
 def train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0], ac_range=[0, 0.99],\
-                            epsilon=0.05, lr=0.002, num_episodes=1000, epis_prog=100, stoch_mode=True): 
+                            st_minmax=[0.01, 2.0], epsilon=0.05, lr=0.002, num_epis=1000, epis_prog=100, stoch_mode=True): 
     nn.init.xavier_uniform_(model[0].weight)
-    train_loss_hist = np.zeros(num_episodes)
-    valid_loss_hist = np.zeros(num_episodes)
-    states_arr = np.zeros(num_episodes + 1)
-    actions_arr = np.zeros(num_episodes)
-    rewards_arr = np.zeros(num_episodes)
-    states_arr[0] = np.random.uniform(low=st_range[0], high=st_range[1])    # initialize state
+    train_loss_hist = np.zeros(num_epis // epis_prog)
+    valid_loss_hist = np.zeros(num_epis // epis_prog)
+    # states_arr = np.zeros(num_epis + 1)     # extra space for s_n+1 after n steps
+    states_arr = np.random.uniform(low=st_range[0], high=st_range[1], size=num_epis)    # initialize all states randomly
+    actions_arr = np.zeros(num_epis)
+    rewards_arr = np.zeros(num_epis)
 
     loss_fn = nn.MSELoss()  # MSELoss/L1Loss/SmoothL1Loss
 
@@ -99,22 +99,31 @@ def train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func, st_rang
                                 st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
         # train_dataset = TensorDataset(x_train, y_train)
         # train_dl = DataLoader(train_dataset, batch_size=1, shuffle=True)
-    for episode in range(num_episodes):
+    for epis in range(num_epis):
         if stoch_mode:
-            state = states_arr[episode]
+            state = states_arr[epis]
             action = select_action(model, state, ac_range=ac_range, epsilon=epsilon)
-            pred = model(torch.tensor([state, action], dtype=torch.float32))[:, 0]
+            pred = model(torch.tensor([state, action], dtype=torch.float32))[0]
             next_st = get_stoch_next_state(state, action, prob_arr, outcome_arr)
             reward = get_state_change_reward(state, next_st, util_func=util_func)
-            states_arr[episode + 1] = next_st
-            rewards_arr[episode] = reward
+            actions_arr[epis] = action
+            rewards_arr[epis] = reward
             loss_tr = loss_fn(pred, torch.tensor(reward, dtype=torch.float32))
             loss_tr.backward()
             optimizer.step()
             optimizer.zero_grad()
+            # if st_minmax[0] < next_st < st_minmax[1]:   # check for termination. For multi-trade
+            #     states_arr[epis + 1] = next_st
+            # else:
+                # states_arr[epis + 1] = np.random.uniform(low=st_range[0], high=st_range[1])    # initialize state
 
-
-
+        if epis % epis_prog == 0:
+            train_loss_hist[epis // epis_prog] += loss_tr.item()
+            with torch.no_grad():
+                pred = model(x_valid)[:, 0]
+                loss_v = loss_fn(pred, y_valid.squeeze())
+                valid_loss_hist[epis // epis_prog] += loss_v.item() / y_valid.size()[0]
+            print(f"Episode: {epis} | Training Loss: {train_loss_hist[epis // epis_prog]} | Validation Loss: {valid_loss_hist[epis // epis_prog]}")
 
     return train_loss_hist, valid_loss_hist
 
@@ -135,6 +144,42 @@ def select_action(model, state, ac_range=[0.0, 1.0], epsilon=0.05, ac_granul=101
             action=  a_arr[idx]
     return action
 
+def plot_history(train_loss_hist, valid_loss_hist):
+    plt.figure(figsize=(7, 5))
+    plt.plot(np.arange(len(train_loss_hist)) + 1, train_loss_hist)
+    plt.plot(np.arange(len(valid_loss_hist)) + 1, valid_loss_hist)
+    plt.title(f"Q-NN Performance History\nEpsilon: 0.05")
+    plt.xlabel("Episodes")
+    plt.ylabel("Loss")
+    plt.legend(["Training", "Validation"])
+    plt.show()
+
+def plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=1E-4, num_epis=100):
+    x_valid, y_valid = build_qnn_determ_set(prob_arr, outcome_arr, util_func, st_range=[0.1, 1.0], ac_range=[0, 1.0], num_st=num_st, num_ac=num_ac)
+
+    with torch.no_grad():
+        y_pred = model(x_valid)[:, 0]
+
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    print(x_valid.shape, y_valid.shape, y_pred.shape)   # torch.Size([1000, 2]) torch.Size([1000]) torch.Size([1000])
+    x_valid = x_valid.detach().numpy()
+    y_valid = y_valid.detach().numpy()
+    y_pred  = y_pred.detach().numpy()
+    plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+    plt.ylim((-.5, 0.2))
+
+    plt.subplot(1, 2, 2)
+    for s_idx in range(num_st):
+        idx = s_idx * num_st
+        plt.plot(x_valid[idx:idx + num_ac, 1], y_pred[idx:idx + num_ac])
+    # plt.title(f"Model vs Theory\nLearning Rate: {lr}")
+    # plt.xlabel("Input X to Model: Investment Fraction")
+    # plt.ylabel("Logarithmic Utility Function")
+    # plt.legend(["Model", "Theory"])
+    # plt.ylim((-2, 1))
+    plt.show()
+
 
 if __name__ == "__main__":
     
@@ -143,13 +188,30 @@ if __name__ == "__main__":
 
     prob_arr = [0.4, 0.6]
     outcome_arr = [0.0, 2.0]
+    st_range=[0.01, 1.0]
+    ac_range=[0, 0.99]
+    st_minmax=[0.01, 2.0]
     stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
-    util_func = lambda x: log_util(x, y_reg=-20)
+    util_func = lambda x: log_util(x, x_reg=1E-10)
+    epsilon=0.05
+    lr=0.001
+    num_epis = 10000
+    epis_prog = 2000
+    stoch_mode = True
 
     model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[20, 30])   # print(model)
 
     x_valid, y_valid = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func, \
-                                st_range=[0.0, 1.0], ac_range=[0, 1], num_st=20, num_ac=20)
+                                    st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+    
+    train_loss_hist, valid_loss_hist = \
+    train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func=util_func, st_range=st_range, ac_range=ac_range,\
+                st_minmax=st_minmax, epsilon=epsilon, lr=lr, num_epis=num_epis, epis_prog=epis_prog, stoch_mode=stoch_mode)
+
+    plot_history(train_loss_hist, valid_loss_hist)
+
+    plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=lr, num_epis=100)
+
 
     # for i in range(20):   # test action selection
     #     action = select_action(model, 0.5, ac_range=[0.0, 1.0], epsilon=0.5, ac_granul=101)
