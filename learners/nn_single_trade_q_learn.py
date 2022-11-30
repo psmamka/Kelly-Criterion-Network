@@ -144,11 +144,11 @@ def select_action(model, state, ac_range=[0.0, 1.0], epsilon=0.05, ac_granul=101
             action=  a_arr[idx]
     return action
 
-def plot_history(train_loss_hist, valid_loss_hist):
+def plot_history(train_loss_hist, valid_loss_hist, epsilon=0.00):
     plt.figure(figsize=(7, 5))
     plt.plot(np.arange(len(train_loss_hist)) + 1, train_loss_hist)
     plt.plot(np.arange(len(valid_loss_hist)) + 1, valid_loss_hist)
-    plt.title(f"Q-NN Performance History\nEpsilon: 0.05")
+    plt.title(f"Q-NN Performance History\nEpsilon: {epsilon}")
     plt.xlabel("Episodes")
     plt.ylabel("Loss")
     plt.legend(["Training", "Validation"])
@@ -167,17 +167,20 @@ def plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=1E-
     y_valid = y_valid.detach().numpy()
     y_pred  = y_pred.detach().numpy()
     plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+    plt.title("Validation Data")
     plt.ylim((-.5, 0.2))
 
     plt.subplot(1, 2, 2)
     for s_idx in range(num_st):
         idx = s_idx * num_st
         plt.plot(x_valid[idx:idx + num_ac, 1], y_pred[idx:idx + num_ac])
-    # plt.title(f"Model vs Theory\nLearning Rate: {lr}")
+    plt.title(f"Model Performance\nLearning Rate: {lr}")
     # plt.xlabel("Input X to Model: Investment Fraction")
     # plt.ylabel("Logarithmic Utility Function")
     # plt.legend(["Model", "Theory"])
     # plt.ylim((-2, 1))
+    print(x_valid[0:num_st * num_ac:num_ac, 0].squeeze())
+    plt.legend(x_valid[0:num_st * num_ac: num_ac, 0])   # labels/legends for different s values
     plt.show()
 
 
@@ -186,20 +189,20 @@ if __name__ == "__main__":
     np.random.seed(1)
     torch.manual_seed(1)
 
-    prob_arr = [0.4, 0.6]
-    outcome_arr = [0.0, 2.0]
-    st_range=[0.01, 1.0]
-    ac_range=[0, 0.99]
-    st_minmax=[0.01, 2.0]
+    prob_arr = np.array([0.4, 0.6])
+    outcome_arr = np.array([0.0, 2.0])
+    st_range = np.array([0.01, 1.0])
+    ac_range = np.array([0, 1.0])
+    st_minmax = np.array([0.01, 2.0])
     stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
-    util_func = lambda x: log_util(x, x_reg=1E-10)
-    epsilon=0.05
-    lr=0.001
-    num_epis = 10000
-    epis_prog = 2000
+    util_func = lambda x: log_util(x, x_reg=1E-5)
+    epsilon = 0.5
+    lr = 1E-6
+    num_epis = 200_000
+    epis_prog = 10_000
     stoch_mode = True
 
-    model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[20, 30])   # print(model)
+    model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[30, 30])   # print(model)
 
     x_valid, y_valid = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func, \
                                     st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
@@ -208,15 +211,33 @@ if __name__ == "__main__":
     train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func=util_func, st_range=st_range, ac_range=ac_range,\
                 st_minmax=st_minmax, epsilon=epsilon, lr=lr, num_epis=num_epis, epis_prog=epis_prog, stoch_mode=stoch_mode)
 
-    plot_history(train_loss_hist, valid_loss_hist)
+    plot_history(train_loss_hist, valid_loss_hist, epsilon=epsilon)
 
-    plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=lr, num_epis=100)
+    plot_performance(model, prob_arr, outcome_arr, num_st=5, num_ac=10, lr=lr, num_epis=num_epis)
 
 
     # for i in range(20):   # test action selection
     #     action = select_action(model, 0.5, ac_range=[0.0, 1.0], epsilon=0.5, ac_granul=101)
     #     print(action)
 
+    # Manual Calculation:
+    # a_in = np.linspace(0, 1, 21, endpoint=True)
+    # # y_1 = 0.4 * np.log(1 - a_in) + 0.6 * np.log(1 + a_in)
+    # y_2 = 0.4 * log_util(1 - a_in, x_reg=1E-10) + 0.6 * log_util(1 + a_in, x_reg=1E-10)
+    # plt.figure()
+    # # plt.plot(a_in, y_1)
+    # plt.plot(a_in, y_2)
+    # plt.ylim((-0.3, 0.1))
+    # plt.show()
+
+    # x_in = np.vstack(([1] * 21 , np.linspace(0, 1, 21, endpoint=True))).T # list of (s, a) for get_determ_reward
+    # # print(x_in)
+    # y = get_determ_reward_y(x_in, prob_arr, outcome_arr, util_func)
+    # plt.figure()
+    # plt.plot(x_in[:, 1], y)
+    # plt.ylim((-0.05, 0.05))
+    # plt.show()
+    
     # for i in range(20):
     #     next_st = np.random.uniform()
     #     reward = get_state_change_reward(0.5, next_st, util_func=util_func)
