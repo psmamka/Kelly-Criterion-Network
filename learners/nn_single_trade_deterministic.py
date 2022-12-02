@@ -38,7 +38,6 @@ def build_double_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[10, 10]):
 
 def build_nn_dataset(num_tr=100, start_pt=0.1, batch_size=1):
     y_reg = -100 # regularization for very small numbers
-    num_tr = num_tr
     x_train = np.linspace(start=start_pt, stop=10.0, num=num_tr, endpoint=True).reshape(num_tr, 1)
     y_train = torch.tensor(get_log_util(x_train, x_reg=1E-100), dtype=torch.float32)
     x_train = torch.tensor(x_train, dtype=torch.float32)
@@ -58,7 +57,7 @@ def get_log_util(x, x_reg=1E-10):
     y = np.log(np.maximum(x, x_reg))
     return y
 
-def train_nn_model_supervised(model, train_dl, x_valid, y_valid, num_tr=100, batch_size=5, lr=0.002, num_epochs=100):
+def train_nn_model_supervised(model, train_dl, x_valid, y_valid, num_tr=100, batch_size=5, lr=0.002, num_epochs=100, epoch_prog=100):
 
     nn.init.xavier_uniform_(model[0].weight)
 
@@ -66,7 +65,8 @@ def train_nn_model_supervised(model, train_dl, x_valid, y_valid, num_tr=100, bat
     valid_loss_hist = np.zeros(num_epochs)
 
     loss_fn = nn.MSELoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for epc in range(num_epochs):
         for x_b, y_b in train_dl:   # batches
@@ -79,31 +79,36 @@ def train_nn_model_supervised(model, train_dl, x_valid, y_valid, num_tr=100, bat
             train_loss_hist[epc] += loss_tr.item()
         
         train_loss_hist[epc] /= num_tr / batch_size
-        pred = model(x_valid)[:, 0]
+        with torch.no_grad():
+            pred = model(x_valid)[:, 0]
         loss_v = loss_fn(pred, y_valid.squeeze())
         valid_loss_hist[epc] += loss_v.item()
+
+        if epc % epoch_prog == 0:
+            print(f"Epoch: {epc} | Training Loss: {train_loss_hist[epc]} | Validation Loss: {valid_loss_hist[epc]}")
     
     return train_loss_hist, valid_loss_hist
 
-def plot_results(train_loss_hist, valid_loss_hist, num_epochs=100):
+def plot_results(train_loss_hist, valid_loss_hist, num_epochs=100, lr=1E-2):
 
     plt.figure(figsize=(10, 5))
     plt.subplot(1, 2, 1)
     plt.plot(np.arange(num_epochs) + 1, train_loss_hist)
     plt.plot(np.arange(num_epochs) + 1, valid_loss_hist)
-    plt.title("Single Hidden Layer NN\nLogarithmic Util Training")
+    plt.title("Deterministi NN Training\nLogarithmic Utility")
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.legend(["Training", "Validation"])
 
     x_test = np.sort(np.random.uniform(low=0.01, high=10, size=100))
     y_test = get_log_util(x_test, x_reg=1E-10)
-    y_pred = model(torch.tensor(x_test.reshape(100, 1), dtype=torch.float32))[:, 0]
+    with torch.no_grad():
+        y_pred = model(torch.tensor(x_test.reshape(100, 1), dtype=torch.float32))[:, 0]
 
     plt.subplot(1, 2, 2)
     plt.plot(x_test[:], y_pred.detach().numpy()[:])
     plt.plot(x_test[:], y_test[:])
-    plt.title("Model vs Theory")
+    plt.title(f"Model vs Theory\nLearning Rate: {lr}")
     plt.xlabel("Input X to Model")
     plt.ylabel("Logarithmic Utility Function")
     plt.legend(["Model", "Theory"])
@@ -117,20 +122,26 @@ if __name__ == "__main__":
     torch.manual_seed(1)
 
     num_tr = 100
-    batch_size = 1
     start_pt = 0.01
+    num_epochs = 2000
+    epoch_prog = 100
+    lr = 0.002
+    batch_size = 2
 
     # model = build_single_hidden_nn(num_inputs=1, num_outputs=1, hid_size=30)
 
     model = build_double_hidden_nn(num_inputs=1, num_outputs=1, hid_size=[15, 15])
 
+    # print(model)
+
     train_dl, x_valid, y_valid = build_nn_dataset(num_tr=num_tr, start_pt=start_pt, batch_size=batch_size)
 
     train_loss_hist, valid_loss_hist = train_nn_model_supervised(model, train_dl, x_valid, y_valid, \
-                                                                num_tr=num_tr, batch_size=batch_size, lr=0.01, num_epochs=100)
+                                                                num_tr=num_tr, batch_size=batch_size, lr=lr, \
+                                                                num_epochs=num_epochs, epoch_prog=epoch_prog)
 
     print(f"train loss: {train_loss_hist} \n validation loss: {valid_loss_hist}")
     
-    plot_results(train_loss_hist, valid_loss_hist, num_epochs=100)
+    plot_results(train_loss_hist, valid_loss_hist, num_epochs=num_epochs, lr=lr)
 
 

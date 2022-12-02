@@ -50,8 +50,9 @@ def get_determ_reward_y(x_in, prob_arr, outcome_arr, util_func):
     p_arr, o_arr = np.array(prob_arr), np.array(outcome_arr)
     for idx, (s, a) in enumerate(x_in):
         # print((1-x) * np.ones(len(o_arr)) + x * o_arr)
-        #                                    ↓ amount not risked ↓   +   ↓ amount risked ↓
-        y[idx] = np.sum(p_arr * util_func(s * (1-a) * np.ones(len(o_arr)) + s * a * o_arr))
+        #                                    ↓ amount not risked ↓   +   ↓ amount risked ↓  -  ↓ util before bet ↓
+        y[idx] = np.sum(p_arr * util_func(s * (1-a) * np.ones(len(o_arr)) + s * a * o_arr) - \
+                        p_arr * util_func(s * np.ones(len(o_arr))))
     return y
 
 def log_util(x, x_reg=None, y_reg=None):
@@ -96,22 +97,26 @@ def train_qnn(model, x_valid, y_valid, prob_arr, outcome_arr, util_func, st_rang
 
     if not stoch_mode:  # Deterministic Training
         x_train, y_train = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func,\
-                                st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
-        # train_dataset = TensorDataset(x_train, y_train)
-        # train_dl = DataLoader(train_dataset, batch_size=1, shuffle=True)
+                                    st_range=st_range, ac_range=ac_range, num_st=20, num_ac=100)
+        print("x_train:", x_train, "y_train:", y_train, "len y_train:", len(y_train))
     for epis in range(num_epis):
         if stoch_mode:
             state = states_arr[epis]
             action = select_action(model, state, ac_range=ac_range, epsilon=epsilon)
-            pred = model(torch.tensor([state, action], dtype=torch.float32))[0]
             next_st = get_stoch_next_state(state, action, prob_arr, outcome_arr)
             reward = get_state_change_reward(state, next_st, util_func=util_func)
-            actions_arr[epis] = action
-            rewards_arr[epis] = reward
-            loss_tr = loss_fn(pred, torch.tensor(reward, dtype=torch.float32))
-            loss_tr.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+            pred = model(torch.tensor([state, action], dtype=torch.float32))[0]
+        else:
+            state, action = x_train[epis % len(y_train)]  
+            reward = y_train[epis % len(y_train)]
+            pred = model(torch.tensor([state, action], dtype=torch.float32))[0]
+
+        actions_arr[epis] = action
+        rewards_arr[epis] = reward
+        loss_tr = loss_fn(pred, torch.tensor(reward, dtype=torch.float32))
+        loss_tr.backward()
+        optimizer.step()
+        optimizer.zero_grad()
             # if st_minmax[0] < next_st < st_minmax[1]:   # check for termination. For multi-trade
             #     states_arr[epis + 1] = next_st
             # else:
@@ -165,15 +170,22 @@ def plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=1E-
     print(x_valid.shape, y_valid.shape, y_pred.shape)   # torch.Size([1000, 2]) torch.Size([1000]) torch.Size([1000])
     x_valid = x_valid.detach().numpy()
     y_valid = y_valid.detach().numpy()
-    y_pred  = y_pred.detach().numpy()
-    plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+    # plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+    for s_idx in range(num_st):
+        idx = s_idx * num_ac
+        plt.plot(x_valid[idx:idx + num_ac, 1], y_valid[idx:idx + num_ac])
     plt.title("Validation Data")
-    plt.ylim((-.5, 0.2))
+    # plt.ylim((-.5, 0.2))
+    plt.legend(x_valid[0:num_st * num_ac: num_ac, 0])   # labels/legends for different s value
+
+    # print(f"x_valid: \n{x_valid} \n y_pred: \n{y_pred}")
 
     plt.subplot(1, 2, 2)
+    y_pred  = y_pred.detach().numpy()
     for s_idx in range(num_st):
-        idx = s_idx * num_st
-        plt.plot(x_valid[idx:idx + num_ac, 1], y_pred[idx:idx + num_ac])
+        idx = s_idx * num_ac
+        plt.plot(x_valid[idx:idx + num_ac, 1], y_pred[idx:idx + num_ac])    # fix bug here
+        # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
     plt.title(f"Model Performance\nLearning Rate: {lr}")
     # plt.xlabel("Input X to Model: Investment Fraction")
     # plt.ylabel("Logarithmic Utility Function")
@@ -189,18 +201,18 @@ if __name__ == "__main__":
     np.random.seed(1)
     torch.manual_seed(1)
 
-    prob_arr = np.array([0.4, 0.6])
+    prob_arr = np.array([0.4, 0.7]) # [0.4, 0.6]
     outcome_arr = np.array([0.0, 2.0])
     st_range = np.array([0.01, 1.0])
-    ac_range = np.array([0, 1.0])
+    ac_range = np.array([0, 0.99])
     st_minmax = np.array([0.01, 2.0])
     stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
     util_func = lambda x: log_util(x, x_reg=1E-5)
     epsilon = 0.5
-    lr = 1E-6
-    num_epis = 200_000
-    epis_prog = 10_000
-    stoch_mode = True
+    lr = 5E-5   # 1E-6
+    num_epis = 40_000
+    epis_prog = 5_000
+    stoch_mode = False   # True: train using stochastic outcome | False: train using expected reward
 
     model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[30, 30])   # print(model)
 
@@ -220,7 +232,7 @@ if __name__ == "__main__":
     #     action = select_action(model, 0.5, ac_range=[0.0, 1.0], epsilon=0.5, ac_granul=101)
     #     print(action)
 
-    # Manual Calculation:
+    # # Manual Calculation:
     # a_in = np.linspace(0, 1, 21, endpoint=True)
     # # y_1 = 0.4 * np.log(1 - a_in) + 0.6 * np.log(1 + a_in)
     # y_2 = 0.4 * log_util(1 - a_in, x_reg=1E-10) + 0.6 * log_util(1 + a_in, x_reg=1E-10)
@@ -230,12 +242,14 @@ if __name__ == "__main__":
     # plt.ylim((-0.3, 0.1))
     # plt.show()
 
-    # x_in = np.vstack(([1] * 21 , np.linspace(0, 1, 21, endpoint=True))).T # list of (s, a) for get_determ_reward
-    # # print(x_in)
-    # y = get_determ_reward_y(x_in, prob_arr, outcome_arr, util_func)
+
     # plt.figure()
-    # plt.plot(x_in[:, 1], y)
-    # plt.ylim((-0.05, 0.05))
+    # for s in [0.1, 0.5, 1.0]:
+    #     x_in = np.vstack(([s] * 21 , np.linspace(0, 1, 21, endpoint=True))).T # list of (s, a) for get_determ_reward
+    #     # print(x_in)
+    #     y = get_determ_reward_y(x_in, prob_arr, outcome_arr, util_func) # bug here
+    #     plt.plot(x_in[:, 1], y)
+    # # plt.ylim((-0.05, 0.05))
     # plt.show()
     
     # for i in range(20):
