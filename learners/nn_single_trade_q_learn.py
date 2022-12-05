@@ -175,6 +175,7 @@ def plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=1E-
         idx = s_idx * num_ac
         plt.plot(x_valid[idx:idx + num_ac, 1], y_valid[idx:idx + num_ac])
     plt.title("Validation Data")
+    plt.xlabel("Investment Fraction")
     # plt.ylim((-.5, 0.2))
     plt.legend(x_valid[0:num_st * num_ac: num_ac, 0])   # labels/legends for different s value
 
@@ -187,7 +188,7 @@ def plot_performance(model, prob_arr, outcome_arr, num_st=10, num_ac=100, lr=1E-
         plt.plot(x_valid[idx:idx + num_ac, 1], y_pred[idx:idx + num_ac])    # fix bug here
         # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
     plt.title(f"Model Performance\nLearning Rate: {lr}")
-    # plt.xlabel("Input X to Model: Investment Fraction")
+    plt.xlabel("Input X to Model: Investment Fraction")
     # plt.ylabel("Logarithmic Utility Function")
     # plt.legend(["Model", "Theory"])
     # plt.ylim((-2, 1))
@@ -201,19 +202,24 @@ if __name__ == "__main__":
     np.random.seed(1)
     torch.manual_seed(1)
 
-    prob_arr = np.array([0.4, 0.7]) # [0.4, 0.6]
+    prob_arr = np.array([0.3, 0.7]) # [0.4, 0.6]
     outcome_arr = np.array([0.0, 2.0])
     st_range = np.array([0.01, 1.0])
     ac_range = np.array([0, 0.99])
     st_minmax = np.array([0.01, 2.0])
-    stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
     util_func = lambda x: log_util(x, x_reg=1E-5)
-    epsilon = 0.5
-    lr = 5E-5   # 1E-6
-    num_epis = 40_000
-    epis_prog = 5_000
-    stoch_mode = False   # True: train using stochastic outcome | False: train using expected reward
+    epsilon = 0.9
 
+    stoch_mode = False  # True: Probabilistic Training | False: Deterministic Training
+    if stoch_mode:
+        lr = 2E-7
+        num_epis = 500_000
+        epis_prog = 50_000
+    else:
+        lr = 2E-5
+        num_epis = 400_000
+        epis_prog = 20_000
+ 
     model = build_multi_hidden_qnn(num_inputs=2, num_outputs=1, hid_size=[30, 30])   # print(model)
 
     x_valid, y_valid = build_qnn_determ_set(prob_arr, outcome_arr, util_func=util_func, \
@@ -225,7 +231,7 @@ if __name__ == "__main__":
 
     plot_history(train_loss_hist, valid_loss_hist, epsilon=epsilon)
 
-    plot_performance(model, prob_arr, outcome_arr, num_st=5, num_ac=10, lr=lr, num_epis=num_epis)
+    plot_performance(model, prob_arr, outcome_arr, num_st=5, num_ac=21, lr=lr, num_epis=num_epis)
 
 
     # for i in range(20):   # test action selection
