@@ -33,10 +33,11 @@ from nn_single_trade_q_learn import \
 Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'))
 
 class QInvestAgent:
-    def __init__(self, env, rng=np.random.default_rng(), mem_size=int(1E6), learn_rate=1E-3, 
-                    eps_init=1.0, eps_decay=0.999, eps_min=0, layers_sz=[20, 20]):
+    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E6), recall_size=None,
+                    learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, layers_sz=[20, 20]):
         
         self.env = env
+        self.util_func = util_func
         
         self.rng = rng
 
@@ -44,11 +45,13 @@ class QInvestAgent:
         self.out_sz = 1 # Expected utility for a given (s, a) pair
 
         self.memory = deque(maxlen=mem_size)
+        self.recall_sz = recall_size if recall_size is not None else mem_size
         self.lr = learn_rate
 
         self.eps = eps_init         # epsilon greedy parameters
         self.eps_decay = eps_decay
         self.eps_min = eps_min
+        self.gamma = discount
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
     
@@ -68,11 +71,10 @@ class QInvestAgent:
     def remember(self, tr):
         self.memory.append(tr)
     
-    def recall(self, recall_sz=None, recall_mech=None):
-        if recall_sz is None: recall_sz = len(self.memory)
+    def recall(self, recall_mech=None):
         if recall_mech is None: recall_mech = 'random'
 
-        samples = self.rng.choice(self.memory, size=recall_sz, replace=True)
+        samples = self.rng.choice(self.memory, size=self.recall_sz, replace=True)
         return samples
     
     def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=101):
@@ -91,10 +93,33 @@ class QInvestAgent:
                 action = a_arr[idx]
         return action
     
-    def _update_eps(self):
+    def update_eps(self):
         if self.eps > self.eps_min: self.eps *= self.eps_decay
     
+    def state_change_reward(self, state, next_st):
+        return self.util_func(next_st) - self.util_func(state)    # utility reward
 
+    def learn_step(self, recall_samples):
+        recall_inputs, recall_targets = [], []
+
+        for idx, transition in enumerate(recall_samples):
+            s, a, r, next_s = transition
+
+            with torch.no_grad():
+                next_a = self.select_action(next_s)
+                next_pred = self.model(torch.tensor([next_s, next_a], dtype=torch.float32))[0]
+                target = r + self.gamma * next_pred
+            
+            recall_inputs[idx] = [s, a]
+            recall_targets[idx] = target
+
+        self.optimizer.zero_grad()
+        recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32))  # [0]
+        loss = self.loss_fn(recall_pred, recall_targets)
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
 
 
 if __name__ == '__main__':
