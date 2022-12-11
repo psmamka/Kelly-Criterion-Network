@@ -54,6 +54,7 @@ class QInvestAgent:
         self.gamma = discount
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
+        self._mem_init()
     
     def _build_qnn(self, in_sz=2, out_sz=1, layers_sz=[20, 20]):
         layer_list = []
@@ -68,11 +69,20 @@ class QInvestAgent:
         self.loss_fn = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr)
     
+    def _mem_init(self):
+        for i in range(self.memory.maxlen):
+            s, a = rng.uniform(size=2)
+            env.reset(start_cap=s)
+            next_s, _, _ = env.step(bet_size= s * a)
+            r = self.state_change_reward(state=s, next_st=next_s)
+            tr = Transition(state=s, action=a, reward=r, next_state=next_s)
+            self.remember(tr)
+    
     def remember(self, tr):
         self.memory.append(tr)
     
     def recall(self, recall_mech=None):
-        if recall_mech is None: recall_mech = 'random'
+        if recall_mech is None: recall_mech = 'random'      # 'random' | 'recent' | 'weighted' | 'smart' 
 
         samples = self.rng.choice(self.memory, size=self.recall_sz, replace=True)
         return samples
@@ -126,17 +136,32 @@ if __name__ == '__main__':
     rng = np.random.default_rng()
     torch.manual_seed(1)
 
-    env = betting_env.BettingEnvBinary(win_pr=0.7, loss_pr=0.3, win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=1, max_cap=10, min_cap=0.01, max_steps=1,     # single bet game
-                                        log_returns=True, log_regul=-10)
-
     prob_arr = np.array([0.3, 0.7]) #
     outcome_arr = np.array([0.0, 2.0])
     st_range = np.array([0.01, 1.0])
     ac_range = np.array([0, 0.99])
-    st_minmax = np.array([0.01, 2.0])
+    st_minmax = np.array([0.01, 5.0])
     util_func = lambda x: log_util(x, x_reg=1E-5)
-    epsilon = 1.0
+    # util_func = lambda x: x
+    mem_size = int(1E5)
+    lr = 1E-3
+    eps_init = 1.0
+    eps_decay = 1 - 1E-3
+    eps_min = 0
+    gamma = 1.0
+    layers_sz = [30, 30]
 
-    agent = QInvestAgent(env=env, rng=rng)
+    # single bet game
+    env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
+                                        start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
+    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, learn_rate=lr, eps_init=eps_init, 
+                            eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz)
+
+    # quick test of env and memory
+    # for i in range(10):
+    #     env.reset()
+    #     s = env.cur_cap
+    #     next_st, r, term = env.step(bet_size=0.5)
+    #     print(f"state: {s}, next_st: {next_st}, r: {r}, term: {term}")
+    # print(agent.memory[1000])
