@@ -111,6 +111,7 @@ class QInvestAgent:
 
     def learn_step(self, recall_samples):
         recall_inputs, recall_targets = [], []
+        # print(recall_inputs.shape)
 
         for idx, transition in enumerate(recall_samples):
             s, a, r, next_s = transition
@@ -118,14 +119,14 @@ class QInvestAgent:
             with torch.no_grad():
                 next_a = self.select_action(next_s)
                 next_pred = self.model(torch.tensor([next_s, next_a], dtype=torch.float32))[0]
-                target = r + self.gamma * next_pred
+                target = r + self.gamma * next_pred # tensor
             
-            recall_inputs[idx] = [s, a]
-            recall_targets[idx] = target
+            recall_inputs.append([s, a])
+            recall_targets.append(target)
 
         self.optimizer.zero_grad()
-        recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32))  # [0]
-        loss = self.loss_fn(recall_pred, recall_targets)
+        recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32)).squeeze()  # [0]
+        loss = self.loss_fn(recall_pred, torch.stack(recall_targets, dim=0))
         loss.backward()
         self.optimizer.step()
 
@@ -143,7 +144,7 @@ if __name__ == '__main__':
     st_minmax = np.array([0.01, 5.0])
     util_func = lambda x: log_util(x, x_reg=1E-5)
     # util_func = lambda x: x
-    mem_size = int(1E5)
+    mem_size = int(1E4)
     lr = 1E-3
     eps_init = 1.0
     eps_decay = 1 - 1E-3
@@ -165,3 +166,10 @@ if __name__ == '__main__':
     #     next_st, r, term = env.step(bet_size=0.5)
     #     print(f"state: {s}, next_st: {next_st}, r: {r}, term: {term}")
     # print(agent.memory[1000])
+
+    # test of recall and learn_Step
+    samples = agent.recall()    # print(samples)
+    loss = agent.learn_step(samples)
+    print(loss)
+
+
