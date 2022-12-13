@@ -16,8 +16,9 @@
 #     --- adjust epsilon
 #     --- memorize the transition
 #     --- take samples from the memory (replay/recall) and train
-#     --- get training loss
+#     --- record get training loss
 #     --- optional: calculate validation loss
+#     --- progress logic
 # - plot training history
 # - plot performance, compare to theoretical util
 
@@ -115,7 +116,7 @@ class QInvestAgent:
                 action = a_arr[idx]
         return action
     
-    def update_eps(self):
+    def _update_eps(self):
         if self.eps > self.eps_min: self.eps *= self.eps_decay
     
     def state_change_reward(self, state, next_st):
@@ -125,7 +126,7 @@ class QInvestAgent:
         recall_inputs, recall_targets = [], []
         # print(recall_inputs.shape)
 
-        for _, transition in enumerate(recall_samples):
+        for transition in recall_samples:
             s, a, r, next_s = transition
 
             with torch.no_grad():
@@ -144,9 +145,33 @@ class QInvestAgent:
 
         return loss.item()
     
-    def train_qnn(self):
+    def train_qnn(self, x_valid, y_valid, num_epis=int(1E5), epis_prog=int(1E3)):
         for layer in self.model:    # initialize linear layers
             if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
+        
+        train_loss_hist = np.zeros(num_epis // epis_prog)
+        valid_loss_hist = np.zeros(num_epis // epis_prog)
+
+        for epis in range(num_epis):
+            # single episode logic
+            s = rng.uniform()
+            env.reset(start_cap = s)
+            a = self.select_action(state = s, ac_range=[0, 1], ac_granul=101)
+            next_s, _, _ = env.step(bet_size= s * a)
+            r = self.state_change_reward(state=s, next_st=next_s)
+            tr = Transition(state=s, action=a, reward=r, next_state=next_s)
+            self.remember(tr)
+            recall_samples = self.recall()
+            train_loss = self.learn_step(recall_samples=recall_samples)
+            self._update_eps()
+
+            if epis % epis_prog == 0:   # progress report logic
+                train_loss_hist[epis // epis_prog] += train_loss
+                with torch.no_grad():
+                    pred = self.model(x_valid)[:, 0]
+                    loss_v = self.loss_fn(pred, y_valid.squeeze())
+                    valid_loss_hist[epis // epis_prog] += loss_v.item() / y_valid.size()[0]
+                print(f"Episode: {epis} | Training Loss: {train_loss_hist[epis // epis_prog]} | Validation Loss: {valid_loss_hist[epis // epis_prog]}")
 
 
 if __name__ == '__main__':
@@ -161,6 +186,7 @@ if __name__ == '__main__':
     util_func = lambda x: log_util(x, x_reg=1E-5)
     # util_func = lambda x: x
     mem_size = int(1E4)
+    recall_mech = 'recent'
     lr = 1E-3
     eps_init = 1.0
     eps_decay = 1 - 1E-3
@@ -172,10 +198,10 @@ if __name__ == '__main__':
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
                                         start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
-    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, learn_rate=lr, eps_init=eps_init, 
-                            eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz)
+    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, learn_rate=lr, 
+                        eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz)
 
-    # quick test of env and memory
+    # # quick test of env and memory
     # for i in range(10):
     #     env.reset()
     #     s = env.cur_cap
@@ -183,12 +209,12 @@ if __name__ == '__main__':
     #     print(f"state: {s}, next_st: {next_st}, r: {r}, term: {term}")
     # print(agent.memory[1000])
 
-    # test of recall and learn_Step
+    # # test of recall and learn_Step
     # samples = agent.recall()    # print(samples)
     # loss = agent.learn_step(samples)
     # print(loss)
 
-    # test of layer weight init
+    # # test of layer weight init
     # agent.train_qnn()
     # print(agent.model)
     # print(agent.model[0].weight)
