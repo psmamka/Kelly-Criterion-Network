@@ -7,9 +7,17 @@
 # 
 # General Steps:
 # - Initialize Neural Network
-# - Initialize the memory double-ended queue
+# - Initialize/fill the memory double-ended queue
 # - Train the network for various initial states
-#   -- epsilon-greedy, with decaying epsilon
+#   -- develop single learn step, where samples from memory are used to train
+#   -- in every training step:
+#     --- reset env
+#     --- choose action (epsilon-greedy, with decaying epsilon)
+#     --- adjust epsilon
+#     --- memorize the transition
+#     --- take samples from the memory (replay/recall) and train
+#     --- get training loss
+#     --- optional: calculate validation loss
 # - plot training history
 # - plot performance, compare to theoretical util
 
@@ -34,7 +42,8 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 
 class QInvestAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E6), recall_size=None,
-                    learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, layers_sz=[20, 20]):
+                    recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, 
+                    layers_sz=[20, 20]):
         
         self.env = env
         self.util_func = util_func
@@ -46,6 +55,7 @@ class QInvestAgent:
 
         self.memory = deque(maxlen=mem_size)
         self.recall_sz = recall_size if recall_size is not None else mem_size
+        self.recall_mech = recall_mech        # recall mechanisms: 'recent' | 'random' | 'weighted' | 'smart'
         self.lr = learn_rate
 
         self.eps = eps_init         # epsilon greedy parameters
@@ -81,10 +91,12 @@ class QInvestAgent:
     def remember(self, tr):
         self.memory.append(tr)
     
-    def recall(self, recall_mech=None):
-        if recall_mech is None: recall_mech = 'random'      # 'random' | 'recent' | 'weighted' | 'smart' 
-
-        samples = self.rng.choice(self.memory, size=self.recall_sz, replace=True)
+    def recall(self):
+        mem_list = list(self.memory)
+        if self.recall_mech == 'recent':
+            samples = mem_list[-self.recall_sz:]
+        elif self.recall_mech == 'random':
+            samples = self.rng.choice(mem_list, size=self.recall_sz, replace=True)
         return samples
     
     def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=101):
@@ -113,7 +125,7 @@ class QInvestAgent:
         recall_inputs, recall_targets = [], []
         # print(recall_inputs.shape)
 
-        for idx, transition in enumerate(recall_samples):
+        for _, transition in enumerate(recall_samples):
             s, a, r, next_s = transition
 
             with torch.no_grad():
@@ -131,6 +143,10 @@ class QInvestAgent:
         self.optimizer.step()
 
         return loss.item()
+    
+    def train_qnn(self):
+        for layer in self.model:    # initialize linear layers
+            if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
 
 
 if __name__ == '__main__':
@@ -168,8 +184,13 @@ if __name__ == '__main__':
     # print(agent.memory[1000])
 
     # test of recall and learn_Step
-    samples = agent.recall()    # print(samples)
-    loss = agent.learn_step(samples)
-    print(loss)
+    # samples = agent.recall()    # print(samples)
+    # loss = agent.learn_step(samples)
+    # print(loss)
+
+    # test of layer weight init
+    # agent.train_qnn()
+    # print(agent.model)
+    # print(agent.model[0].weight)
 
 
