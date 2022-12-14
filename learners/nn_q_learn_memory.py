@@ -36,8 +36,7 @@ from collections import namedtuple
 from collections import deque
 import matplotlib.pyplot as plt
 
-from nn_single_trade_q_learn import \
-    log_util, get_determ_reward_y, get_stoch_next_state, get_state_change_reward
+from nn_single_trade_q_learn import log_util
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'))
 
@@ -148,7 +147,7 @@ class QInvestAgent:
     def train_qnn(self, x_valid, y_valid, num_epis=int(1E5), epis_prog=int(1E3)):
         for layer in self.model:    # initialize linear layers
             if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
-        
+
         train_loss_hist = np.zeros(num_epis // epis_prog)
         valid_loss_hist = np.zeros(num_epis // epis_prog)
 
@@ -172,8 +171,32 @@ class QInvestAgent:
                     loss_v = self.loss_fn(pred, y_valid.squeeze())
                     valid_loss_hist[epis // epis_prog] += loss_v.item() / y_valid.size()[0]
                 print(f"Episode: {epis} | Training Loss: {train_loss_hist[epis // epis_prog]} | Validation Loss: {valid_loss_hist[epis // epis_prog]}")
+        return train_loss_hist, valid_loss_hist
 
+    @classmethod
+    def generate_validation_data(cls, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0],  ac_range=[0, 0.99], num_st=20, num_ac=20):
 
+        st_arr = np.linspace(start=st_range[0], stop=st_range[1], num=num_st, endpoint=True)
+        ac_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=num_ac, endpoint=True)
+
+        ss, aa = np.meshgrid(st_arr, ac_arr, indexing='ij')
+
+        x_valid = np.array(list(zip(ss.reshape(num_st * num_ac,), aa.reshape(num_st * num_ac,))))
+        y_valid = cls.get_determ_reward(x_valid, prob_arr, outcome_arr, util_func)
+        return torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
+    
+    @classmethod
+    def get_determ_reward(cls, x_in, prob_arr, outcome_arr, util_func):
+        y = np.zeros(len(x_in))
+        p_arr, o_arr = np.array(prob_arr), np.array(outcome_arr)
+        for idx, (s, a) in enumerate(x_in):
+            # print((1-x) * np.ones(len(o_arr)) + x * o_arr)
+            #                                    ↓ amount not risked ↓   +   ↓ amount risked ↓  -  ↓ util before bet ↓
+            y[idx] = np.sum(p_arr * util_func(s * (1-a) * np.ones(len(o_arr)) + s * a * o_arr) - \
+                            p_arr * util_func(s * np.ones(len(o_arr))))
+        return y
+
+    
 if __name__ == '__main__':
     rng = np.random.default_rng()
     torch.manual_seed(1)
@@ -193,13 +216,20 @@ if __name__ == '__main__':
     eps_min = 0
     gamma = 1.0
     layers_sz = [30, 30]
+    num_epis = 100
+    epis_prog = 10
 
-    # single bet game
+    # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
                                         start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
     agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, learn_rate=lr, 
                         eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz)
+
+    x_valid, y_valid = QInvestAgent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
+                                        st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+    
+    agent.train_qnn(x_valid, y_valid, num_epis=num_epis, epis_prog=epis_prog)
 
     # # quick test of env and memory
     # for i in range(10):
@@ -218,5 +248,28 @@ if __name__ == '__main__':
     # agent.train_qnn()
     # print(agent.model)
     # print(agent.model[0].weight)
+
+    # # test of get_determ_reward():
+    # plt.figure()
+    # s_arr = [0.1, 0.5, 1.0]
+    # for s in s_arr:
+    #     x_in = np.vstack(([s] * 21 , np.linspace(0, 1, 21, endpoint=True))).T # list of (s, a) for get_determ_reward
+    #     y = QInvestAgent.get_determ_reward(x_in, prob_arr, outcome_arr, util_func)
+    #     plt.plot(x_in[:, 1], y)
+    # plt.legend(s_arr)
+    # plt.show()
+
+    # # test of generate_validation_data()
+    # x_v, y_v = QInvestAgent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
+    #                                 st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+    # print(x_v.shape, y_v.shape) # torch.Size([400, 2]) torch.Size([400])
+    # y = y_v.detach().numpy().reshape((20, 20))
+    # print(y.shape)
+    # plt.imshow(y, cmap='gray')
+    # plt.colorbar()
+    # plt.xlabel('action: betting fraction')
+    # plt.ylabel('state: capital')
+    # plt.show()
+
 
 
