@@ -30,7 +30,7 @@ def build_nn_determ_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_a
     print(f"x_valid.shape: {x_valid.shape} | y_valid.shape: {y_valid.shape}" )
     return torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
 
-def build_nn_training_set_sym(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10):
+def build_nn_training_set_sym(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10, rr=1.0):
     # symmetric division of points between 0 and twice expected reward 
     st_arr = np.linspace(start=st_range[0], stop=st_range[1], num=num_st, endpoint=True)
     ac_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=num_ac, endpoint=True) # .reshape(num_ac, 1)
@@ -39,7 +39,7 @@ def build_nn_training_set_sym(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10,
     x_train = np.array(list(zip(ss.reshape(num_st * num_ac,), aa.reshape(num_st * num_ac,))))
     y_train = (aa * ss).reshape((num_st * num_ac, 1))   # y = st * ac
     x_train = np.vstack((x_train, x_train))
-    y_train = np.vstack((0 * y_train, 2 * y_train))
+    y_train = np.vstack((0 * y_train, 2 * y_train)) * rr
     print(f"x_train.shape: {x_train.shape} | y_train.shape: {y_train.shape}" )
     return torch.tensor(x_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32)
 
@@ -50,7 +50,7 @@ def build_nn_training_set_stoch(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_samp
     ac_arr = rng.uniform(low=ac_range[0], high=ac_range[1], size=num_samp)
     x_train = np.array(list(zip(st_arr, ac_arr)))   # print(x_train[-20:])
     y_train = np.array(list(map(
-                                lambda x: x[0] * x[1] * 2 if rng.uniform() < prob_win else 0, x_train
+                                lambda x: x[0] * x[1] if rng.uniform() < prob_win else -x[0] * x[1], x_train
                                 ))).reshape((num_samp, 1))  # print(y_train[-20:])
     print(f"x_train.shape: {x_train.shape} | y_train.shape: {y_train.shape}" )
     return torch.tensor(x_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32)
@@ -95,7 +95,7 @@ def train_nn(model, x_valid, y_valid, train_dl, num_tr=200, batch_size=50, lr=0.
 
     return train_loss_hist, valid_loss_hist
 
-def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=100, stoch_mode=True):
+def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=100, stoch_mode=True, rr=1.0):
 
     plt.figure(figsize=(7, 5))
     plt.plot(np.arange(num_epochs) + 1, train_loss_hist)
@@ -108,7 +108,7 @@ def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=10
 
     num_st = 10
     num_ac = 10
-    x_test, y_test = build_nn_determ_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=num_st, num_ac=num_ac)
+    x_test, y_test = build_nn_determ_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=num_st, num_ac=num_ac, rr=rr)
     with torch.no_grad():
         y_pred = model(x_test)[:, 0]
     
@@ -143,35 +143,38 @@ if __name__ == "__main__":
     np.random.seed(1)
     torch.manual_seed(1)
 
+    prob_win = 0.7  # 70% double, 30% nothing
+    rr = 2 * prob_win - 1.0 # reward ratio: expected reward per aount betted
+
     stoch_mode = True   # True: Probabilistic Training | False: Deterministic Training
     sym_mode = False     # True: symmetric division of points between 0 and 2 * expected reward | False: full stochastic
     if stoch_mode:
-        hid_size=[10, 10]
-        num_epochs = 10_000 if sym_mode else 20_000
-        epoch_prog = 500
-        num_tr=200
-        batch_size = 200 if sym_mode else 200
-        lr = 3E-4 if sym_mode else 2E-5
+        hid_size = [10, 10]
+        stoch_samp = 1000
+        num_epochs = 10_000 if sym_mode else 40_000
+        epoch_prog = 500 if sym_mode else 1000
+        num_tr = 200
+        batch_size = 200 if sym_mode else stoch_samp
+        lr = 3E-4 if sym_mode else 5E-6
     else:
-        hid_size=[10, 10]
+        hid_size = [10, 10]
         num_epochs = 500
         epoch_prog = 50
-        num_tr=100
+        num_tr = 100
         batch_size = 10
-        # lr = 0.020   # MSE
-        lr = 3E-4  # L1
+        lr = 3E-4
 
     train_loss_hist, valid_loss_hist = np.zeros(num_epochs), np.zeros(num_epochs)
     
     model = build_multi_hidden_nn(num_inputs=2, num_outputs=1, hid_size=hid_size)
 
-    x_valid, y_valid = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=9, num_ac=9, rr=1.0)
+    x_valid, y_valid = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=9, num_ac=9, rr=rr)
 
     if stoch_mode:
         if sym_mode:
-            x_train, y_train = build_nn_training_set_sym(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10, sym_mode=sym_mode)
+            x_train, y_train = build_nn_training_set_sym(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10, rr=rr)
         else:
-            x_train, y_train = build_nn_training_set_stoch(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_samp=200, prob_win=0.5)
+            x_train, y_train = build_nn_training_set_stoch(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_samp=stoch_samp, prob_win=prob_win)
     else:
         x_train, y_train = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10)
     # print(f"x_valid: {x_valid[-10:]}\n", f"y_valid: {y_valid[-10:]}\n", f"x_train: {x_train[-10:]}\n", f"y_train:{y_train[-10:]}\n")
@@ -182,4 +185,4 @@ if __name__ == "__main__":
     train_nn(model, x_valid, y_valid, train_dl, num_tr=num_tr, batch_size=batch_size, lr=lr, num_epochs=num_epochs, 
     epoch_prog=epoch_prog, train_loss_hist=train_loss_hist, valid_loss_hist=valid_loss_hist)
     
-    plot_results(train_loss_hist, valid_loss_hist, model, lr=lr, num_epochs=num_epochs, stoch_mode=stoch_mode)
+    plot_results(train_loss_hist, valid_loss_hist, model, lr=lr, num_epochs=num_epochs, stoch_mode=stoch_mode, rr=rr)
