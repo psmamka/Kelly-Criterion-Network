@@ -19,18 +19,19 @@ def build_multi_hidden_nn(num_inputs=2, num_outputs=1, hid_size=[20, 20]):
     model = nn.Sequential(*layer_list)
     return model
 
-def build_nn_determ_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10):
+def build_nn_determ_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10, rr=1.0):
+    # rr: reward ratio, i.e. expected reward per amount risked: reward = rr * st * ac
     st_arr = np.linspace(start=st_range[0], stop=st_range[1], num=num_st, endpoint=True)
     ac_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=num_ac, endpoint=True) # .reshape(num_ac, 1)
     ss, aa = np.meshgrid(st_arr, ac_arr, indexing='ij')
     # x_valid, y_valid = ac_arr, ac_arr
     x_valid = np.array(list(zip(ss.reshape(num_st * num_ac,), aa.reshape(num_st * num_ac,))))
-    y_valid = (aa * ss).reshape((num_st * num_ac, 1))   # y = st * ac
+    y_valid = (aa * ss).reshape((num_st * num_ac, 1)) * rr   # y = st * ac
     print(f"x_valid.shape: {x_valid.shape} | y_valid.shape: {y_valid.shape}" )
     return torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
 
-def build_nn_training_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10):
-
+def build_nn_training_set_sym(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10):
+    # symmetric division of points between 0 and twice expected reward 
     st_arr = np.linspace(start=st_range[0], stop=st_range[1], num=num_st, endpoint=True)
     ac_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=num_ac, endpoint=True) # .reshape(num_ac, 1)
     ss, aa = np.meshgrid(st_arr, ac_arr, indexing='ij')
@@ -39,6 +40,18 @@ def build_nn_training_set(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_st=10, num
     y_train = (aa * ss).reshape((num_st * num_ac, 1))   # y = st * ac
     x_train = np.vstack((x_train, x_train))
     y_train = np.vstack((0 * y_train, 2 * y_train))
+    print(f"x_train.shape: {x_train.shape} | y_train.shape: {y_train.shape}" )
+    return torch.tensor(x_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32)
+
+def build_nn_training_set_stoch(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_samp=200, prob_win=0.5):
+    # fully stochastic selection of state, action and reward (between 0 and 2 * expeted reward)
+    rng = np.random.default_rng(1)
+    st_arr = rng.uniform(low=st_range[0], high=st_range[1], size=num_samp)
+    ac_arr = rng.uniform(low=ac_range[0], high=ac_range[1], size=num_samp)
+    x_train = np.array(list(zip(st_arr, ac_arr)))   # print(x_train[-20:])
+    y_train = np.array(list(map(
+                                lambda x: x[0] * x[1] * 2 if rng.uniform() < prob_win else 0, x_train
+                                ))).reshape((num_samp, 1))  # print(y_train[-20:])
     print(f"x_train.shape: {x_train.shape} | y_train.shape: {y_train.shape}" )
     return torch.tensor(x_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32)
 
@@ -51,6 +64,8 @@ def train_nn(model, x_valid, y_valid, train_dl, num_tr=200, batch_size=50, lr=0.
             num_epochs=1000, epoch_prog=100, train_loss_hist=None, valid_loss_hist=None):
 
     nn.init.xavier_uniform_(model[0].weight)
+    # for layer in model:    # initialize linear layers
+    #     if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
 
     if train_loss_hist is None or valid_loss_hist is None:
         train_loss_hist, valid_loss_hist = np.zeros(num_epochs), np.zeros(num_epochs)
@@ -82,7 +97,7 @@ def train_nn(model, x_valid, y_valid, train_dl, num_tr=200, batch_size=50, lr=0.
 
 def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=100, stoch_mode=True):
 
-    plt.figure(figsize=(7, 7))
+    plt.figure(figsize=(7, 5))
     plt.plot(np.arange(num_epochs) + 1, train_loss_hist)
     plt.plot(np.arange(num_epochs) + 1, valid_loss_hist)
     plt.title(f"NN Performance\nTraining Mode: {'Stochastic' if stoch_mode else 'Deterministic'}")
@@ -100,7 +115,7 @@ def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=10
     y_2d_test =  y_test.detach().numpy().reshape((num_st, num_ac))
     y_2d_pred =  y_pred.detach().numpy().reshape((num_st, num_ac))
     
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
     plt.contourf(y_2d_test)
     plt.colorbar()
@@ -113,20 +128,30 @@ def plot_results(train_loss_hist, valid_loss_hist, model, lr=1E-4, num_epochs=10
     plt.title(f"Predicted Contour")
     plt.show()
 
+    # diagonal (a = s) comparison plot
+    y_diag1d_test = list(map(lambda i: y_2d_test[i, i], np.arange(num_st)))
+    y_diag1d_pred = list(map(lambda i: y_2d_pred[i, i], np.arange(num_st)))
+    plt.figure(figsize=(7, 5))
+    plt.plot(np.arange(num_st), y_diag1d_test, np.arange(num_st), y_diag1d_pred)
+    plt.legend(['Target', 'Model'])
+    plt.title(f"Diagonal Elements: Model vs Target")
+    plt.show()
+
 
 if __name__ == "__main__":
     
     np.random.seed(1)
     torch.manual_seed(1)
 
-    stoch_mode = True  # True: Probabilistic Training | False: Deterministic Training
+    stoch_mode = True   # True: Probabilistic Training | False: Deterministic Training
+    sym_mode = False     # True: symmetric division of points between 0 and 2 * expected reward | False: full stochastic
     if stoch_mode:
         hid_size=[10, 10]
-        num_epochs = 10_000
+        num_epochs = 10_000 if sym_mode else 20_000
         epoch_prog = 500
         num_tr=200
-        batch_size = 100
-        lr = 3E-4   # MSE
+        batch_size = 200 if sym_mode else 200
+        lr = 3E-4 if sym_mode else 2E-5
     else:
         hid_size=[10, 10]
         num_epochs = 500
@@ -140,10 +165,13 @@ if __name__ == "__main__":
     
     model = build_multi_hidden_nn(num_inputs=2, num_outputs=1, hid_size=hid_size)
 
-    x_valid, y_valid = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=9, num_ac=9)
+    x_valid, y_valid = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=9, num_ac=9, rr=1.0)
 
     if stoch_mode:
-        x_train, y_train = build_nn_training_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10)
+        if sym_mode:
+            x_train, y_train = build_nn_training_set_sym(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10, sym_mode=sym_mode)
+        else:
+            x_train, y_train = build_nn_training_set_stoch(st_range=[0.0, 1.0], ac_range=[0, 1.0], num_samp=200, prob_win=0.5)
     else:
         x_train, y_train = build_nn_determ_set(st_range=[0, 1.0], ac_range=[0, 1.0], num_st=10, num_ac=10)
     # print(f"x_valid: {x_valid[-10:]}\n", f"y_valid: {y_valid[-10:]}\n", f"x_train: {x_train[-10:]}\n", f"y_train:{y_train[-10:]}\n")
