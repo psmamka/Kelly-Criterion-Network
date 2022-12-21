@@ -43,7 +43,7 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 class QInvestAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E6), recall_size=None,
                     recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, 
-                    layers_sz=[20, 20]):
+                    layers_sz=[20, 20], next_step_lookup=True):
         
         self.env = env
         self.util_func = util_func
@@ -63,6 +63,8 @@ class QInvestAgent:
         self.eps_min = eps_min
         self.gamma = discount
 
+        self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
+
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
         self._mem_init()
     
@@ -72,12 +74,15 @@ class QInvestAgent:
 
         for idx, (num_in, num_out) in enumerate(layer_sizes):
             layer_list.append(nn.Linear(num_in, num_out))
+               # rectifier layer: ReLU() | LeakyReLU(negative_slope=0.1) | Sigmoid() | 
             if idx < len(layers_sz): layer_list.append(nn.ReLU())
 
         self.model = nn.Sequential(*layer_list) # print(self.model)
 
-        self.loss_fn = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr)
+        self.loss_fn = nn.MSELoss()   # MSELoss() | L1Loss() | CrossEntropyLoss() | BCELoss()
+        # reduction = 'mean' (default) | 'none' | 'sum'
+        # optimizer:s SGD | Adam
+        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=self.lr, weight_decay=0.0)
     
     def _mem_init(self):
         for i in range(self.memory.maxlen):
@@ -95,11 +100,11 @@ class QInvestAgent:
         mem_list = list(self.memory)
         if self.recall_mech == 'recent':
             samples = mem_list[-self.recall_sz:]
-        elif self.recall_mech == 'random':
-            samples = self.rng.choice(mem_list, size=self.recall_sz, replace=True)
+        # elif self.recall_mech == 'random':    # fix
+        #     samples = self.rng.choice(mem_list, size=self.recall_sz, replace=True)
         return samples
     
-    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=101):
+    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21):
         # ac_granul: granularity of the action space for q determination/action selection
         r = self.rng.uniform(low=0, high=1)
         if r < self.eps:
@@ -128,10 +133,13 @@ class QInvestAgent:
         for transition in recall_samples:
             s, a, r, next_s = transition
 
-            with torch.no_grad():
-                next_a = self.select_action(next_s)
-                next_pred = self.model(torch.tensor([next_s, next_a], dtype=torch.float32))[0]
-                target = r + self.gamma * next_pred # tensor
+            if self.next_lookup: # the q method: use predictions for the next steps
+                with torch.no_grad():
+                    next_a = self.select_action(next_s)
+                    next_pred = self.model(torch.tensor([next_s, next_a], dtype=torch.float32))[0]
+                    target = torch.tensor(r, dtype=torch.float32) + self.gamma * next_pred  # tensor
+            else:
+                target = torch.tensor(r, dtype=torch.float32)   # no next step for now
             
             recall_inputs.append([s, a])
             recall_targets.append(target)
@@ -145,8 +153,9 @@ class QInvestAgent:
         return loss.item()
     
     def train_qnn(self, num_epis=int(1E5), epis_prog=int(1E3)):
-        for layer in self.model:    # initialize linear layers
-            if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
+        nn.init.xavier_uniform_(self.model[0].weight)
+        # for layer in self.model:    # initialize linear layers
+        #     if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
 
         self.train_loss_hist = np.zeros(num_epis // epis_prog)
         self.valid_loss_hist = np.zeros(num_epis // epis_prog)
@@ -163,16 +172,16 @@ class QInvestAgent:
             r = self.state_change_reward(state=s, next_st=next_s)
             tr = Transition(state=s, action=a, reward=r, next_state=next_s)
             self.remember(tr)
-            recall_samples = self.recall()
+            recall_samples = self.rng.permutation(self.recall())
             train_loss = self.learn_step(recall_samples=recall_samples)
             self._update_eps()
 
             if epis % epis_prog == 0:   # progress report logic
-                self.train_loss_hist[epis // epis_prog] += train_loss
+                self.train_loss_hist[epis // epis_prog] = train_loss
                 with torch.no_grad():
                     pred = self.model(self.x_valid)[:, 0]
                     loss_v = self.loss_fn(pred, self.y_valid.squeeze())
-                    self.valid_loss_hist[epis // epis_prog] += loss_v.item() / self.y_valid.size()[0]
+                    self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
                 print(f"Episode: {epis} | Training Loss: {self.train_loss_hist[epis // epis_prog]} | Validation Loss: {self.valid_loss_hist[epis // epis_prog]}")
         return self.train_loss_hist, self.valid_loss_hist
 
@@ -204,13 +213,13 @@ class QInvestAgent:
         plt.figure(figsize=(7, 5))
         plt.plot(np.arange(len(self.train_loss_hist)) + 1, self.train_loss_hist)
         plt.plot(np.arange(len(self.valid_loss_hist)) + 1, self.valid_loss_hist)
-        plt.title(f"Q-NN Performance History\Memory: {self.memory.maxlen}")
+        plt.title(f"Q-NN Performance History\nMemory: {self.memory.maxlen}")
         plt.xlabel("Episodes")
         plt.ylabel("Loss")
         plt.legend(["Training", "Validation"])
         plt.show()
 
-    def plot_performance(self, show_legends=True):
+    def plot_performance(self, show_legends=True, num_st=10, num_ac=10):
         if self.x_valid is None or self.y_valid is None:
             raise Exception("validation data need to be initialized")
         
@@ -220,7 +229,7 @@ class QInvestAgent:
         plt.figure(figsize=(10, 5))
 
         plt.subplot(1, 2, 1)    # validation data plot
-        print(self.x_valid.shape, self.y_valid.shape, y_pred.shape)   # torch.Size([1000, 2]) torch.Size([1000]) torch.Size([1000])
+        print(self.x_valid.shape, self.y_valid.shape, y_pred.shape)   # torch.Size([400, 2]) torch.Size([400]) torch.Size([400])
         x_valid = self.x_valid.detach().numpy()
         y_valid = self.y_valid.detach().numpy()
         # plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
@@ -244,44 +253,68 @@ class QInvestAgent:
         if show_legends:
             plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s values
         plt.show()
+
+        y_2d_test =  y_valid.reshape((num_st, num_ac))
+        y_2d_pred =  y_pred.reshape((num_st, num_ac))
+        
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.contourf(y_2d_test)
+        plt.colorbar()
+        plt.title(f"Target Contour")
+        # plt.xlabel("Input X to Model")
+        # plt.legend(["Model", "Theory"])
+        plt.subplot(1, 2, 2)
+        plt.contourf(y_2d_pred)
+        plt.colorbar()
+        plt.title(f"Predicted Contour")
+        plt.show()
     
 if __name__ == '__main__':
     rng = np.random.default_rng()
     torch.manual_seed(1)
 
+    # betting env properties
     prob_arr = np.array([0.3, 0.7]) #
     outcome_arr = np.array([0.0, 2.0])
-    st_range = np.array([0.01, 1.0])
-    ac_range = np.array([0, 0.99])
+    # validation data grid
+    st_range = np.array([0.0, 1.0])
+    ac_range = np.array([0, 1.0])
     st_minmax = np.array([0.01, 5.0])
-    util_func = lambda x: log_util(x, x_reg=1E-5)
-    # util_func = lambda x: x
-    mem_size = int(1E3)
-    recall_mech = 'recent'
-    lr = 1E-4
+    # util_func = lambda x: log_util(x, x_reg=1E-5)
+    util_func = lambda x: x
+    mem_size = int(2E3)
+    recall_mech = 'recent' # 'recent' | 'random'
+    lr = 1E-5
     eps_init = 1.0
-    eps_decay = 1 - 1E-3
+    eps_decay = 1 # 1 - 1E-4
     eps_min = 0
-    gamma = 1.0
-    layers_sz = [30, 30]
-    num_epis = 400
-    epis_prog = 50
+    gamma = 0.0
+    layers_sz = [10, 10]
+    next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
+
+    num_epis = 30_000
+    epis_prog = 1000
+    # validation
+    num_st = 10
+    num_ac = 10
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
                                         start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
     agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, learn_rate=lr, 
-                        eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz)
+                        eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
+                        next_step_lookup=next_step_lookup)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
-                                        st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+                                        st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
     
     agent.train_qnn(num_epis=num_epis, epis_prog=epis_prog)
 
     agent.plot_training_history()
 
-    agent.plot_performance(show_legends=False)
+    agent.plot_performance(show_legends=False, num_st=num_st, num_ac=num_ac)
 
     # # quick test of env and memory
     # for i in range(10):
@@ -292,7 +325,8 @@ if __name__ == '__main__':
     # print(agent.memory[1000])
 
     # # test of recall and learn_Step
-    # samples = agent.recall()    # print(samples)
+    # samples = agent.recall()    
+    # print(samples)
     # loss = agent.learn_step(samples)
     # print(loss)
 
@@ -312,12 +346,12 @@ if __name__ == '__main__':
     # plt.show()
 
     # # test of generate_validation_data()
-    # x_v, y_v = QInvestAgent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
+    # x_v, y_v = agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
     #                                 st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
     # print(x_v.shape, y_v.shape) # torch.Size([400, 2]) torch.Size([400])
     # y = y_v.detach().numpy().reshape((20, 20))
     # print(y.shape)
-    # plt.imshow(y, cmap='gray')
+    # plt.contourf(y)
     # plt.colorbar()
     # plt.xlabel('action: betting fraction')
     # plt.ylabel('state: capital')
