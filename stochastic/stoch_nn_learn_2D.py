@@ -150,12 +150,12 @@ if __name__ == "__main__":
     sym_mode = False     # True: symmetric division of points between 0 and 2 * expected reward | False: full stochastic
     if stoch_mode:
         hid_size = [10, 10]
-        stoch_samp = 1000
-        num_epochs = 10_000 if sym_mode else 40_000
+        stoch_samp = 2000
+        num_epochs = 10_000 if sym_mode else 30_000
         epoch_prog = 500 if sym_mode else 1000
         num_tr = 200
         batch_size = 200 if sym_mode else stoch_samp
-        lr = 3E-4 if sym_mode else 5E-6
+        lr = 3E-4 if sym_mode else 1E-5
     else:
         hid_size = [10, 10]
         num_epochs = 500
