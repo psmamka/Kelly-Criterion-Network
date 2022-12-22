@@ -34,6 +34,7 @@ import torch
 import torch.nn as nn
 from collections import namedtuple
 from collections import deque
+from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 
 from nn_single_trade_q_learn import log_util
@@ -43,7 +44,7 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 class QInvestAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E6), recall_size=None,
                     recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, 
-                    layers_sz=[20, 20], next_step_lookup=True):
+                    layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1):
         
         self.env = env
         self.util_func = util_func
@@ -64,6 +65,7 @@ class QInvestAgent:
         self.gamma = discount
 
         self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
+        self.epoc_per_epis = epochs_per_episode
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
         self._mem_init()
@@ -127,6 +129,7 @@ class QInvestAgent:
         return self.util_func(next_st) - self.util_func(state)    # utility reward
 
     def learn_step(self, recall_samples):
+        sz = recall_samples.shape[0]    # print(f"sample size: {sz}")
         recall_inputs, recall_targets = [], []
         # print(recall_inputs.shape)
 
@@ -144,11 +147,20 @@ class QInvestAgent:
             recall_inputs.append([s, a])
             recall_targets.append(target)
 
-        self.optimizer.zero_grad()
-        recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32)).squeeze()  # [0]
-        loss = self.loss_fn(recall_pred, torch.stack(recall_targets, dim=0))
-        loss.backward()
-        self.optimizer.step()
+        # train_dataset = TensorDataset(np.array(recall_inputs).reshape((sz, 2)), recall_targets.reshape((sz, 1)))
+        train_dataset = TensorDataset(torch.tensor(recall_inputs, dtype=torch.float32), 
+                                        torch.tensor(recall_targets, dtype=torch.float32))
+        train_dl = DataLoader(train_dataset, batch_size=len(recall_targets), shuffle=True)   
+
+        for epoch in range(self.epoc_per_epis):
+            for x_b, y_b in train_dl:   # bathces
+                # recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32)).squeeze()  # [0]
+                # loss = self.loss_fn(recall_pred, torch.stack(recall_targets, dim=0))
+                pred = self.model(x_b)[:, 0]
+                loss = self.loss_fn(pred, y_b.squeeze())
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
         return loss.item()
     
@@ -233,25 +245,32 @@ class QInvestAgent:
         x_valid = self.x_valid.detach().numpy()
         y_valid = self.y_valid.detach().numpy()
         # plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+        # print(x_valid[0:self.num_st_val * self.num_ac_val:self.num_ac_val, 0].squeeze())
+
+        legends = ['_no_label'] * self.num_st_val  # 
+        if show_legends: legends[0], legends[-1] = f"s = {x_valid[0, 0]}", f"s = {x_valid[-1, 0]}"
+        # print(legends)
+
         for s_idx in range(self.num_st_val):
             idx = s_idx * self.num_ac_val
             plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_valid[idx:idx + self.num_ac_val])
         plt.title("Validation Data")
         plt.xlabel("Investment Fraction")
-        if show_legends:
-            plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s value
+        plt.legend(legends)
+        # if show_legends:
+        #     plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s value
 
         plt.subplot(1, 2, 2)    # performance data plot
         y_pred  = y_pred.detach().numpy()
         for s_idx in range(self.num_st_val):
             idx = s_idx * self.num_ac_val
-            plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_pred[idx:idx + self.num_ac_val])    # fix bug here
+            plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_pred[idx:idx + self.num_ac_val])
             # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
         plt.title(f"Model Performance\nLearning Rate: {lr}")
         plt.xlabel("Input X to Model: Investment Fraction")
-        print(x_valid[0:self.num_st_val * self.num_ac_val:self.num_ac_val, 0].squeeze())
-        if show_legends:
-            plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s values
+        plt.legend(legends)
+        # if show_legends:
+        #     plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s values
         plt.show()
 
         y_2d_test =  y_valid.reshape((num_st, num_ac))
@@ -292,9 +311,10 @@ if __name__ == '__main__':
     gamma = 0.0
     layers_sz = [10, 10]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
+    epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 30_000
-    epis_prog = 1000
+    num_epis = 30_000 // epochs_per_episode
+    epis_prog = 1000 // epochs_per_episode
     # validation
     num_st = 10
     num_ac = 10
@@ -305,7 +325,7 @@ if __name__ == '__main__':
 
     agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, learn_rate=lr, 
                         eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
-                        next_step_lookup=next_step_lookup)
+                        next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
                                         st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
@@ -314,7 +334,7 @@ if __name__ == '__main__':
 
     agent.plot_training_history()
 
-    agent.plot_performance(show_legends=False, num_st=num_st, num_ac=num_ac)
+    agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
 
     # # quick test of env and memory
     # for i in range(10):
