@@ -42,7 +42,7 @@ from nn_single_trade_q_learn import log_util
 Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'))
 
 class QInvestAgent:
-    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E6), recall_size=None,
+    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E4), recall_size=None,
                     recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, 
                     layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1):
         
@@ -88,9 +88,10 @@ class QInvestAgent:
     
     def _mem_init(self):
         for i in range(self.memory.maxlen):
-            s, a = rng.uniform(size=2)
-            env.reset(start_cap=s)
-            next_s, _, _ = env.step(bet_size= s * a)
+            s = self.rng.uniform()
+            a = self.rng.uniform()
+            self.env.reset(start_cap=s)
+            next_s, _, _ = self.env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
             tr = Transition(state=s, action=a, reward=r, next_state=next_s)
             self.remember(tr)
@@ -178,7 +179,7 @@ class QInvestAgent:
         for epis in range(num_epis):
             # single episode logic
             s = rng.uniform()
-            env.reset(start_cap = s)
+            self.env.reset(start_cap = s)
             a = self.select_action(state = s, ac_range=[0, 1], ac_granul=101)
             next_s, _, _ = env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
@@ -210,17 +211,17 @@ class QInvestAgent:
         self.num_st_val, self.num_ac_val = num_st, num_ac
         return self.x_valid, self.y_valid
 
-    def plot_training_history(self):
+    def plot_training_history(self, epis_prog=1000):
         plt.figure(figsize=(10, 5))
         plt.subplot(1, 2, 1)
-        plt.plot(np.arange(len(self.train_loss_hist)) + 1, self.train_loss_hist)
+        plt.plot(np.arange(len(self.train_loss_hist)) * epis_prog + 1, self.train_loss_hist)
         plt.title(f"Q-NN Performance History: Training\nMemory: {self.memory.maxlen}")
-        plt.xlabel("Episodes")
+        plt.xlabel("Epochs")
         plt.ylabel("Loss")
         plt.subplot(1, 2, 2) 
-        plt.plot(np.arange(len(self.valid_loss_hist)) + 1, self.valid_loss_hist)
+        plt.plot(np.arange(len(self.valid_loss_hist)) * epis_prog + 1, self.valid_loss_hist)
         plt.title(f"Q-NN Performance History: Validation")
-        plt.xlabel("Episodes")
+        plt.xlabel("Epochs")
         plt.ylabel("Loss")
         plt.show()
 
@@ -233,15 +234,14 @@ class QInvestAgent:
 
         plt.figure(figsize=(10, 5))
 
-        plt.subplot(1, 2, 1)    # validation data plot
+        ax = plt.subplot(1, 2, 1)    # validation data plot
         print(self.x_valid.shape, self.y_valid.shape, y_pred.shape)   # torch.Size([400, 2]) torch.Size([400]) torch.Size([400])
         x_valid = self.x_valid.detach().numpy()
         y_valid = self.y_valid.detach().numpy()
         # plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
         # print(x_valid[0:self.num_st_val * self.num_ac_val:self.num_ac_val, 0].squeeze())
 
-        legends = [False] * self.num_st_val  # 
-        if show_legends: legends[0], legends[-1] = f"s = {x_valid[0, 0]}", f"s = {x_valid[-1, 0]}"
+        legends = [f"s = {z:{3}.{2}}" for z in x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0]]
         # print(legends)
 
         for s_idx in range(self.num_st_val):
@@ -249,11 +249,12 @@ class QInvestAgent:
             plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_valid[idx:idx + self.num_ac_val], label=legends[s_idx])
         plt.title("Validation Data")
         plt.xlabel("Investment Fraction")
-        # plt.legend(legends)
+        handles, _ = ax.get_legend_handles_labels()
+        if show_legends: ax.legend([handles[0], handles[-1]], [legends[0], legends[-1]])
         # if show_legends:
         #     plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s value
 
-        plt.subplot(1, 2, 2)    # performance data plot
+        ax2 = plt.subplot(1, 2, 2)    # performance data plot
         y_pred  = y_pred.detach().numpy()
         for s_idx in range(self.num_st_val):
             idx = s_idx * self.num_ac_val
@@ -261,26 +262,33 @@ class QInvestAgent:
             # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
         plt.title(f"Model Performance\nLearning Rate: {lr}")
         plt.xlabel("Input X to Model: Investment Fraction")
-        # plt.legend(legends)
-        # if show_legends:
-        #     plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s values
+        
+        handles, _ = ax2.get_legend_handles_labels()
+        if show_legends: ax2.legend([handles[0], handles[-1]], [legends[0], legends[-1]])
         plt.show()
 
         y_2d_test =  y_valid.reshape((num_st, num_ac))
         y_2d_pred =  y_pred.reshape((num_st, num_ac))
-        
+        num_levs = 25
         plt.figure(figsize=(12, 5))
         plt.subplot(1, 2, 1)
-        plt.contourf(y_2d_test, levels=20)
+        plt.contourf(y_2d_test, levels=num_levs)
         plt.colorbar()
         plt.title(f"Target Contour")
         plt.xlabel("Action: Investment Fraction")
         plt.ylabel("State: Capital")
+        plt.xticks(ticks=np.arange(num_ac), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_ac, endpoint=True)])
+        plt.yticks(ticks=np.arange(num_st), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_st, endpoint=True)])
         # plt.legend(["Model", "Theory"])
         plt.subplot(1, 2, 2)
-        plt.contourf(y_2d_pred, levels=20)
+        plt.contourf(y_2d_pred, levels=num_levs)
         plt.colorbar()
         plt.title(f"Predicted Contour")
+        plt.xlabel("Action: Investment Fraction")
+        plt.ylabel("State: Capital")
+        plt.xticks(ticks=np.arange(num_ac), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_ac, endpoint=True)])
+        plt.yticks(ticks=np.arange(num_st), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_st, endpoint=True)])
+
         plt.show()
     
     @classmethod
@@ -311,8 +319,10 @@ if __name__ == '__main__':
     # betting env properties
     prob_arr = np.array([0.3, 0.7]) #
     outcome_arr = np.array([0.0, 2.0])
+    # validation
+    num_st, num_ac = 10, 21
     # validation data grid
-    st_range = np.array([0.0, 1.0])
+    st_range = np.array([0.1, 1.0])
     ac_range = np.array([0, 1.0])
     st_minmax = np.array([0.0, 5.0])
     util_func = lambda x: log_util(x, x_reg=1E-3)
@@ -322,9 +332,9 @@ if __name__ == '__main__':
         n_util_func = QInvestAgent.normalize_util_func(util_func, minmax=st_minmax, num=101, verbose=True)
     else:
         n_util_func = util_func
-    mem_size = int(2E3)
+    mem_size = int(4E3)
     recall_mech = 'recent' # 'recent' | 'random'
-    lr = 1E-5
+    lr = 2E-5
     eps_init = 1.0
     eps_decay = 1 # 1 - 1E-4
     eps_min = 0
@@ -333,11 +343,8 @@ if __name__ == '__main__':
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
     epochs_per_episode = 100      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 30_000 // epochs_per_episode
+    num_epis = 25_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
-    # validation
-    num_st = 10
-    num_ac = 10
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
@@ -352,7 +359,7 @@ if __name__ == '__main__':
     
     agent.train_qnn(num_epis=num_epis, epis_prog=epis_prog)
 
-    agent.plot_training_history()
+    agent.plot_training_history(epis_prog=epis_prog)
 
     agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
 
