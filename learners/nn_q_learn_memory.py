@@ -225,7 +225,7 @@ class QInvestAgent:
         plt.ylabel("Loss")
         plt.show()
 
-    def plot_performance(self, show_legends=True, num_st=10, num_ac=10):
+    def plot_performance(self, show_legends=True, num_st=11, num_ac=11):
         if self.x_valid is None or self.y_valid is None:
             raise Exception("validation data need to be initialized")
         
@@ -261,7 +261,7 @@ class QInvestAgent:
             plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_pred[idx:idx + self.num_ac_val], label=legends[s_idx])
             # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
         plt.title(f"Model Performance\nLearning Rate: {lr}")
-        plt.xlabel("Input X to Model: Investment Fraction")
+        plt.xlabel("Investment Fraction")
         
         handles, _ = ax2.get_legend_handles_labels()
         if show_legends: ax2.legend([handles[0], handles[-1]], [legends[0], legends[-1]])
@@ -324,7 +324,7 @@ if __name__ == '__main__':
     # validation data grid
     st_range = np.array([0.1, 1.0])
     ac_range = np.array([0, 1.0])
-    st_minmax = np.array([0.0, 5.0])
+    st_minmax = np.array([0.0, 2.0])
     util_func = lambda x: log_util(x, x_reg=1E-3)
     # util_func = lambda x: x
     normalize_uf = True     # True: Normalize utility function to [-1 +1] range | False: use raw util func
@@ -332,7 +332,7 @@ if __name__ == '__main__':
         n_util_func = QInvestAgent.normalize_util_func(util_func, minmax=st_minmax, num=11, verbose=True)
     else:
         n_util_func = util_func
-    mem_size = int(4E3)     # 1E4 for random
+    mem_size = int(4E3)     # 4E3 recent, 1E4 for random
     recall_mech = 'recent' # 'recent' | 'random'
     recall_size = mem_size # // 2
     lr = 2E-5
@@ -344,18 +344,18 @@ if __name__ == '__main__':
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
     epochs_per_episode = 100      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 50_000 // epochs_per_episode
+    num_epis = 30_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
                                         start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
-    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, recall_size=recall_size, 
+    agent = QInvestAgent(env=env, rng=rng, util_func=n_util_func, mem_size=mem_size, recall_mech=recall_mech, recall_size=recall_size, 
                         learn_rate=lr, eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
                         next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
 
-    agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
+    agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
                                         st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
     
     agent.train_qnn(num_epis=num_epis, epis_prog=epis_prog)
