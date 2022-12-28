@@ -103,8 +103,8 @@ class QInvestAgent:
         mem_list = list(self.memory)
         if self.recall_mech == 'recent':
             samples = mem_list[-self.recall_sz:]
-        # elif self.recall_mech == 'random':    # fix
-        #     samples = self.rng.choice(mem_list, size=self.recall_sz, replace=True)
+        elif self.recall_mech == 'random':  
+            samples = self.rng.choice(mem_list, size=self.recall_sz, replace=False)
         return samples
     
     def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21):
@@ -327,13 +327,14 @@ if __name__ == '__main__':
     st_minmax = np.array([0.0, 5.0])
     util_func = lambda x: log_util(x, x_reg=1E-3)
     # util_func = lambda x: x
-    normalize_uf = False     # True: Normalize utility function to [-1 +1] range | False: use raw util func
+    normalize_uf = True     # True: Normalize utility function to [-1 +1] range | False: use raw util func
     if normalize_uf: 
-        n_util_func = QInvestAgent.normalize_util_func(util_func, minmax=st_minmax, num=101, verbose=True)
+        n_util_func = QInvestAgent.normalize_util_func(util_func, minmax=st_minmax, num=11, verbose=True)
     else:
         n_util_func = util_func
-    mem_size = int(4E3)
+    mem_size = int(4E3)     # 1E4 for random
     recall_mech = 'recent' # 'recent' | 'random'
+    recall_size = mem_size # // 2
     lr = 2E-5
     eps_init = 1.0
     eps_decay = 1 # 1 - 1E-4
@@ -343,15 +344,15 @@ if __name__ == '__main__':
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
     epochs_per_episode = 100      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 25_000 // epochs_per_episode
+    num_epis = 50_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
                                         start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
 
-    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, learn_rate=lr, 
-                        eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
+    agent = QInvestAgent(env=env, rng=rng, util_func=util_func, mem_size=mem_size, recall_mech=recall_mech, recall_size=recall_size, 
+                        learn_rate=lr, eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
                         next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
