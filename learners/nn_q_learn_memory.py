@@ -36,6 +36,7 @@ from collections import namedtuple
 from collections import deque
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
+import time
 
 from nn_single_trade_q_learn import log_util
 
@@ -166,6 +167,7 @@ class QInvestAgent:
         return loss.item()
     
     def train_qnn(self, num_epis=int(1E5), epis_prog=int(1E3)):
+        start_t = time.time()
         nn.init.xavier_uniform_(self.model[0].weight)
         # for layer in self.model:    # initialize linear layers
         #     if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
@@ -195,7 +197,12 @@ class QInvestAgent:
                     pred = self.model(self.x_valid)[:, 0]
                     loss_v = self.loss_fn(pred, self.y_valid.squeeze())
                     self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
-                print(f"Episode: {epis:{3}} | Training Loss: {self.train_loss_hist[epis // epis_prog]:{9}.{6}} | Validation Loss: {self.valid_loss_hist[epis // epis_prog]:{9}.{6}}")
+                print(f"Episode: {epis:{3}}", end = " | ")
+                print(f"Training Loss: {self.train_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
+                print(f"Validation Loss: {self.valid_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
+                print(f"Time: {time.time() - start_t:{5}.{3}} s")
+
+        print(f"Total Training Time: {time.time() - start_t:{5}.{3}} s")
         return self.train_loss_hist, self.valid_loss_hist
 
     def generate_validation_data(self, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0],  ac_range=[0, 0.99], num_st=20, num_ac=20):
@@ -335,14 +342,14 @@ if __name__ == '__main__':
     mem_size = int(4E3)     # 4E3 recent, 1E4 for random
     recall_mech = 'recent' # 'recent' | 'random'
     recall_size = mem_size # // 2
-    lr = 2E-5
+    lr = 1E-5
     eps_init = 1.0
     eps_decay = 1 # 1 - 1E-4
     eps_min = 0
     gamma = 0.0
     layers_sz = [10, 10]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
-    epochs_per_episode = 100      # number of cycles of training in self.learn_step per episode/call
+    epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
 
     num_epis = 30_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
