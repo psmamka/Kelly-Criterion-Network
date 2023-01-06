@@ -45,7 +45,7 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 class QInvestAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E4), recall_size=None,
                     recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0, discount=1.0, 
-                    layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1):
+                    layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1, use_granul=False, granul_grid=[11, 11]):
         
         self.env = env
         self.util_func = util_func
@@ -68,6 +68,11 @@ class QInvestAgent:
         self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
         self.epoc_per_epis = epochs_per_episode
 
+        self.use_granul = use_granul
+        self.granul_grid = granul_grid
+        self.st_granul = np.linspace(start=0, stop=1, num=self.granul_grid[0], endpoint=True)
+        self.ac_granul = np.linspace(start=0, stop=1, num=self.granul_grid[1], endpoint=True)
+
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
         self._mem_init()
     
@@ -88,9 +93,13 @@ class QInvestAgent:
         self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=self.lr, weight_decay=0.0)
     
     def _mem_init(self):
-        for i in range(self.memory.maxlen):
-            s = self.rng.uniform()
-            a = self.rng.uniform()
+        for _ in range(self.memory.maxlen):
+            if not self.use_granul:     # continuum training
+                s = self.rng.uniform()
+                a = self.rng.uniform()
+            else:                       # discrete training
+                s = self.rng.choice(self.st_granul)
+                a = self.rng.uniform(self.ac_granul)
             self.env.reset(start_cap=s)
             next_s, _, _ = self.env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
@@ -108,14 +117,18 @@ class QInvestAgent:
             samples = self.rng.choice(mem_list, size=self.recall_sz, replace=False)
         return samples
     
-    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21):
+    def select_action(self, state, ac_range=[0.0, 1.0]):
         # ac_granul: granularity of the action space for q determination/action selection
         r = self.rng.uniform(low=0, high=1)
-        if r < self.eps:
-            action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
+        if r < self.eps:    # random action
+            if not self.use_granul:     # random from continuum
+                action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
+            else:                       # random from granularized
+                action = self.rng.choice(self.ac_granul)
         else:
-            s_arr = np.array([state] * ac_granul)
-            a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
+            s_arr = np.array([state] * self.granul_grid[1])
+            a_arr = self.ac_granul
+            # a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
             sa_arr = np.vstack((s_arr, a_arr)).transpose()  # rows: ac_granul, columns: 2   print(sa_arr.shape)
             sa_tensor = torch.tensor(sa_arr, dtype=torch.float32)
             with torch.no_grad():
@@ -180,9 +193,13 @@ class QInvestAgent:
 
         for epis in range(num_epis):
             # single episode logic
-            s = rng.uniform()
+            if not self.use_granul: # continuum
+                s = self.rng.uniform()
+            else:                   # granular state
+                s = self.rng.choice(self.st_granul)
+            
             self.env.reset(start_cap = s)
-            a = self.select_action(state = s, ac_range=[0, 1], ac_granul=101)
+            a = self.select_action(state = s)
             next_s, _, _ = env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
             tr = Transition(state=s, action=a, reward=r, next_state=next_s)
@@ -354,13 +371,18 @@ if __name__ == '__main__':
     num_epis = 30_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
 
+    use_granul = True           # True: Use discritization (granularity) | False: use continuum for training
+    granul_grid = [11, 11]      # Size of the discretization grid for [state action] including end points
+
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
-                                        start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, log_returns=False)
+                                        start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, 
+                                        log_returns=False)
 
     agent = QInvestAgent(env=env, rng=rng, util_func=n_util_func, mem_size=mem_size, recall_mech=recall_mech, recall_size=recall_size, 
                         learn_rate=lr, eps_init=eps_init, eps_decay=eps_decay, eps_min=eps_min, discount=gamma, layers_sz=layers_sz,
-                        next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
+                        next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode, use_granul=use_granul, 
+                        granul_grid=granul_grid)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
                                         st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
@@ -370,7 +392,7 @@ if __name__ == '__main__':
     agent.plot_training_history(epis_prog=epis_prog)
 
     agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
-
+    
     # # quick test of env and memory
     # for i in range(10):
     #     env.reset()
