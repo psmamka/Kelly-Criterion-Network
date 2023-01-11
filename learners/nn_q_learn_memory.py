@@ -99,7 +99,7 @@ class QInvestAgent:
                 a = self.rng.uniform()
             else:                       # discrete training
                 s = self.rng.choice(self.st_granul)
-                a = self.rng.uniform(self.ac_granul)
+                a = self.rng.choice(self.ac_granul)
             self.env.reset(start_cap=s)
             next_s, _, _ = self.env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
@@ -144,7 +144,7 @@ class QInvestAgent:
         return self.util_func(next_st) - self.util_func(state)    # utility reward
 
     def learn_step(self, recall_samples):
-        sz = recall_samples.shape[0]    # print(f"sample size: {sz}")
+        # sz = recall_samples.shape[0]    # print(f"sample size: {sz}")
         recall_inputs, recall_targets = [], []
         # print(recall_inputs.shape)
 
@@ -371,7 +371,7 @@ if __name__ == '__main__':
     num_epis = 30_000 // epochs_per_episode
     epis_prog = 1000 // epochs_per_episode
 
-    use_granul = True           # True: Use discritization (granularity) | False: use continuum for training
+    use_granul = False          # True: Use discritization (granularity) | False: use continuum for training
     granul_grid = [11, 11]      # Size of the discretization grid for [state action] including end points
 
     # single-bet game
@@ -401,13 +401,13 @@ if __name__ == '__main__':
     #     print(f"state: {s}, next_st: {next_st}, r: {r}, term: {term}")
     # print(agent.memory[1000])
 
-    # # test of recall and learn_Step
+    # # quick test of recall and learn_Step
     # samples = agent.recall()    
     # print(samples)
     # loss = agent.learn_step(samples)
     # print(loss)
 
-    # # test of layer weight init
+    # # quick test of layer weight init
     # agent.train_qnn()
     # print(agent.model)
     # print(agent.model[0].weight)
