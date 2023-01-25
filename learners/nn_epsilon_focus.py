@@ -11,7 +11,8 @@
 #   - we have to keep track of optmal actions
 #   In one simple implementation:
 #       - initially we select uniform samples from an interval that covers the entire action space
-#       - after some training, find optimal actions for different states
+#       - In each step, for a given state, estimate the optimal action. 
+#           -- center the epsilon-focus interval on the estimate of max util 
 #       - As the network is trained the the focus interval is centered at the max util point,
 #           - different max util, hence different focus center for different states
 #       - The size/diameter of the action focus is gradually reduced (up to some minimum)
@@ -39,8 +40,9 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 
 class QInvestAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), mem_size=int(1E4), recall_size=None,
-                    recall_mech='recent', learn_rate=1E-3, eps_init=1.0, eps_decay=0.999, eps_min=0.5, discount=1.0, 
-                    layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1):
+                    recall_mech='recent', learn_rate=1E-3, ac_range=[0.0, 1.0], st_range=[0.0, 1.0],  eps_foc_init=1.0, 
+                    eps_foc_decay=0.999, eps_foc_min=0.5, eps_foc_gran=0.1, discount=1.0, layers_sz=[20, 20], 
+                    next_step_lookup=True, epochs_per_episode=1):
         
         self.env = env
         self.util_func = util_func
@@ -55,16 +57,22 @@ class QInvestAgent:
         self.recall_mech = recall_mech        # recall mechanisms: 'recent' | 'random' | 'weighted' | 'smart'
         self.lr = learn_rate
 
-        self.eps = eps_init         # epsilon greedy parameters
-        self.eps_decay = eps_decay
-        self.eps_min = eps_min
-        self.gamma = discount
+        self.ac_range = ac_range
+        self.st_range = st_range
 
+        self.eps_f = eps_foc_init         # epsilon greedy parameters
+        self.eps_f_dec = eps_foc_decay
+        self.eps_f_min = eps_foc_min
+        self.eps_f_gran = eps_foc_gran
+        self._epsilon_focus_init()
+
+        self.gamma = discount
         self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
         self.epoc_per_epis = epochs_per_episode
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
         self._mem_init()
+        # self._focus_mem_init()      # <=== keeping track of the focus centers. Then need to update in each epoch.
     
     def _build_qnn(self, in_sz=2, out_sz=1, layers_sz=[20, 20]):
         layer_list = []
@@ -93,6 +101,16 @@ class QInvestAgent:
             tr = Transition(state=s, action=a, reward=r, next_state=next_s)
             self.remember(tr)
     
+    def _epsilon_focus_init(self, verbose=False):
+        # number of epsilon centers to keep track of: (st_max - st_min) / epsilon_granularity + 1 
+        # (+1 because exclusive of boundaries)
+        num_eps_states = int((self.st_range[1] - self.st_range[0]) / self.eps_f_gran + 1)
+        self.eps_f_states = np.linspace(self.st_range[0], self.st_range[1], num_eps_states, endpoint= True)
+        avg_action = (self.ac_range[1] - self.ac_range[0]) / 2.0    # middle point for possible actions used for init
+        self.eps_f_centers = np.ones(num_eps_states) * avg_action
+        if verbose:
+            print(f"eps_f granular states: {self.eps_f_states} \neps_f action centers: {self.eps_f_centers}")
+
     def remember(self, tr):
         self.memory.append(tr)
     
@@ -106,8 +124,8 @@ class QInvestAgent:
     
     def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21):
         # ac_granul: granularity of the action space for q determination/action selection
-        r = self.rng.uniform(low=0, high=1)
-        if r < self.eps:    # random action
+        r = self.rng.uniform(low=0, high=1)     # <=== update for focus here
+        if r < self.eps_f:    # random action
             action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
         else:
             s_arr = np.array([state] * ac_granul)
@@ -121,8 +139,8 @@ class QInvestAgent:
                 action = a_arr[idx]
         return action
     
-    def _update_eps(self):
-        if self.eps > self.eps_min: self.eps *= self.eps_decay
+    def _update_eps_f(self):    # update epsilon focus
+        if self.eps_f > self.eps_f_min: self.eps_f *= self.eps_f_dec
     
     def state_change_reward(self, state, next_st):
         return self.util_func(next_st) - self.util_func(state)    # utility reward
@@ -187,7 +205,7 @@ class QInvestAgent:
             self.remember(tr)
             recall_samples = self.rng.permutation(self.recall())
             train_loss = self.learn_step(recall_samples=recall_samples)
-            self._update_eps()
+            self._update_eps_f()
 
             if epis % epis_prog == 0:   # progress report logic
                 self.train_loss_hist[epis // epis_prog] = train_loss
@@ -327,8 +345,8 @@ if __name__ == '__main__':
     # validation
     num_st, num_ac = 10, 21
     # validation data grid
-    st_range = np.array([0.1, 1.0])
-    ac_range = np.array([0, 1.0])
+    st_range = np.array([0.0, 1.0])
+    ac_range = np.array([0.0, 1.0])
     st_minmax = np.array([0.0, 2.0])
     util_func = lambda x: log_util(x, x_reg=1E-3)
     # util_func = lambda x: x
@@ -341,9 +359,10 @@ if __name__ == '__main__':
     recall_mech = 'recent' # 'recent' | 'random'
     recall_size = mem_size # // 2
     lr = 2E-5 # 1E-5
-    eps_foc_init = 1.0          # <=== epsilon focus implementation
+    eps_foc_init = 1.0          # <=== epsilon focus implementation: radius of interval
     eps_foc_decay = 1 # 1 - 1E-4
-    eps_foc_min = 0
+    eps_foc_min = 0.1
+    eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
     layers_sz = [10, 10]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
@@ -358,8 +377,10 @@ if __name__ == '__main__':
                                         log_returns=False)
 
     agent = QInvestAgent(env=env, rng=rng, util_func=n_util_func, mem_size=mem_size, recall_mech=recall_mech, recall_size=recall_size, 
-                        learn_rate=lr, eps_foc_init=eps_foc_init, eps_foc_decay=eps_foc_decay, eps_foc_min=eps_foc_min, discount=gamma, 
-                        layers_sz=layers_sz, next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
+                        learn_rate=lr, ac_range=ac_range, st_range=st_range, eps_foc_init=eps_foc_init, eps_foc_decay=eps_foc_decay, 
+                        eps_foc_min=eps_foc_min, eps_foc_gran=eps_foc_gran, discount=gamma, layers_sz=layers_sz, 
+                        next_step_lookup=next_step_lookup, 
+                        epochs_per_episode=epochs_per_episode)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
                                         st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
@@ -370,3 +391,46 @@ if __name__ == '__main__':
 
     agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
     
+    # # quick test of env and memory
+    # for i in range(10):
+    #     env.reset()
+    #     s = env.cur_cap
+    #     next_st, r, term = env.step(bet_size=0.5)
+    #     print(f"state: {s}, next_st: {next_st}, r: {r}, term: {term}")
+    # print(agent.memory[1000])
+
+    # # quick test of recall and learn_Step
+    # samples = agent.recall()    
+    # print(samples)
+    # loss = agent.learn_step(samples)
+    # print(loss)
+
+    # # quick test of layer weight init
+    # agent.train_qnn()
+    # print(agent.model)
+    # print(agent.model[0].weight)
+
+    # # test of get_determ_reward():
+    # plt.figure()
+    # s_arr = [0.1, 0.5, 1.0]
+    # for s in s_arr:
+    #     x_in = np.vstack(([s] * 21 , np.linspace(0, 1, 21, endpoint=True))).T # list of (s, a) for get_determ_reward
+    #     y = QInvestAgent.get_determ_reward(x_in, prob_arr, outcome_arr, util_func)
+    #     plt.plot(x_in[:, 1], y)
+    # plt.legend(s_arr)
+    # plt.show()
+
+    # # test of generate_validation_data()
+    # x_v, y_v = agent.generate_validation_data(prob_arr, outcome_arr, util_func=util_func,
+    #                                 st_range=st_range, ac_range=ac_range, num_st=20, num_ac=20)
+    # print(x_v.shape, y_v.shape) # torch.Size([400, 2]) torch.Size([400])
+    # y = y_v.detach().numpy().reshape((20, 20))
+    # print(y.shape)
+    # plt.contourf(y)
+    # plt.colorbar()
+    # plt.xlabel('action: betting fraction')
+    # plt.ylabel('state: capital')
+    # plt.show()
+
+    # # quick test of epsilon granularity
+    # agent._epsilon_focus_init(verbose = True)
