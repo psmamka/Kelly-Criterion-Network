@@ -60,10 +60,10 @@ class QInvestAgent:
         self.ac_range = ac_range
         self.st_range = st_range
 
-        self.eps_f = eps_foc_init         # epsilon greedy parameters
-        self.eps_f_dec = eps_foc_decay
-        self.eps_f_min = eps_foc_min
-        self.eps_f_gran = eps_foc_gran
+        self.eps_f_rad = eps_foc_init           # epsilon greedy parameters: radius
+        self.eps_f_dec = eps_foc_decay          # decay rate
+        self.eps_f_min = eps_foc_min            # minimum radius
+        self.eps_f_gran = eps_foc_gran          # granularity for states
         self._epsilon_focus_init()
 
         self.gamma = discount
@@ -107,9 +107,9 @@ class QInvestAgent:
         num_eps_states = int((self.st_range[1] - self.st_range[0]) / self.eps_f_gran + 1)
         self.eps_f_states = np.linspace(self.st_range[0], self.st_range[1], num_eps_states, endpoint= True)
         avg_action = (self.ac_range[1] - self.ac_range[0]) / 2.0    # middle point for possible actions used for init
-        self.eps_f_centers = np.ones(num_eps_states) * avg_action
+        self.eps_ac_centers = np.ones(num_eps_states) * avg_action
         if verbose:
-            print(f"eps_f granular states: {self.eps_f_states} \neps_f action centers: {self.eps_f_centers}")
+            print(f"eps_f granular states: {self.eps_f_states} \neps_f action centers: {self.eps_ac_centers}")
 
     def remember(self, tr):
         self.memory.append(tr)
@@ -122,12 +122,15 @@ class QInvestAgent:
             samples = self.rng.choice(mem_list, size=self.recall_sz, replace=False)
         return samples
     
-    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21):
+    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21): # <=== NEEDS UPDATE/CLEAN UP
         # ac_granul: granularity of the action space for q determination/action selection
         r = self.rng.uniform(low=0, high=1)     # <=== update for focus here
-        if r < self.eps_f:    # random action
+        if r < self.eps_f_rad:    # completely random action: 
+            # select granular state, select action within epsilon focus
             action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
         else:
+            s_idx, s_cent = self.select_eps_center(state)  # decide which epsilon center we should use
+
             s_arr = np.array([state] * ac_granul)
             a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
 
@@ -138,9 +141,45 @@ class QInvestAgent:
                 idx = np.argmax(q_arr)
                 action = a_arr[idx]
         return action
+
+    def select_eps_center(self, state, verbose=False):
+        if state < self.st_range[0]:
+            s_idx, st_cent = 0, self.st_range[0]
+        elif state > self.st_range[1]:
+            s_idx, st_cent = len(self.eps_f_states) - 1, self.st_range[1]
+        else:
+            s_idx = round((state - self.st_range[0]) / self.eps_f_gran)     # round without 2nd arg returns int
+            st_cent = self.eps_f_states[s_idx]
+
+        if verbose: print(f"state: {state} | eps idx: {s_idx} | eps state center: {st_cent}")
+        return s_idx, st_cent
     
-    def _update_eps_f(self):    # update epsilon focus
-        if self.eps_f > self.eps_f_min: self.eps_f *= self.eps_f_dec
+    def _update_eps_f(self, num_ac=11, verbose=False):    # update epsilon focus: action radius and action centers
+        if verbose:
+            print(f"eps-foc radius (before): {self.eps_f_rad}")
+            print(f"eps-foc states | action centers (before): \n{np.vstack((self.eps_f_states, self.eps_ac_centers)).T}")
+
+        # update epsilon radius
+        if self.eps_f_rad > self.eps_f_min: self.eps_f_rad *= self.eps_f_dec
+        # update epsilon focus centers:
+        #   - build the state|action grid
+        #   - do a forward run, find the optimal action center for each state center
+        s_arr = self.eps_f_states
+        a_arr = np.linspace(self.ac_range[0], self.ac_range[1], num=num_ac, endpoint=True)
+
+        for s_idx, st in enumerate(s_arr):
+            # for each state build the state-action input to the model
+            sa_arr = np.vstack(([st] * num_ac, a_arr)).T  # rows: num_ac, columns: 2   print(sa_arr.shape)
+            sa_tensor = torch.tensor(sa_arr, dtype=torch.float32)
+            with torch.no_grad():
+                q_arr = self.model(sa_tensor).detach().numpy()[:]
+                a_idx = np.argmax(q_arr)    # optimal action index
+            opt_ac = a_arr[a_idx]
+            self.eps_ac_centers[s_idx] = opt_ac
+
+        if verbose:
+            print(f"eps-foc radius (after): {self.eps_f_rad}")
+            print(f"eps-foc states | action centers (after): \n{np.vstack((self.eps_f_states, self.eps_ac_centers)).T}")
     
     def state_change_reward(self, state, next_st):
         return self.util_func(next_st) - self.util_func(state)    # utility reward
@@ -360,7 +399,7 @@ if __name__ == '__main__':
     recall_size = mem_size # // 2
     lr = 2E-5 # 1E-5
     eps_foc_init = 1.0          # <=== epsilon focus implementation: radius of interval
-    eps_foc_decay = 1 # 1 - 1E-4
+    eps_foc_decay = 2 - 1E-3 # 1 - 1E-4
     eps_foc_min = 0.1
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
@@ -391,6 +430,8 @@ if __name__ == '__main__':
 
     agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
     
+    # === ↓ Quick Tests Here ↓ ===
+
     # # quick test of env and memory
     # for i in range(10):
     #     env.reset()
@@ -434,3 +475,12 @@ if __name__ == '__main__':
 
     # # quick test of epsilon granularity
     # agent._epsilon_focus_init(verbose = True)
+
+    # # quick test of epsilon center selection:
+    # agent.select_eps_center(-.2, verbose=True)
+    # agent.select_eps_center(0.19, verbose=True)
+    # agent.select_eps_center(0.51, verbose=True)
+    # agent.select_eps_center(1.3, verbose=True)
+
+    # # quick test of epsilon radius and center update
+    # agent._update_eps_f(num_ac=11, verbose=True)
