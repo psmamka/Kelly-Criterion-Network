@@ -17,6 +17,16 @@
 #           - different max util, hence different focus center for different states
 #       - The size/diameter of the action focus is gradually reduced (up to some minimum)
 #       - with further training, the center and diameter are adjusted (state dependent)
+#   The logics behind selecting action:
+#       - set the boundaries of the epsilon focus interval for each granular state
+#       - based on the current state, determine the granular state
+#       - for no-qnn / no-next-state lookup:
+#           -- select action uniformly from within the epsilon interval
+#       - for q learning
+#           -- use granularization of actions within the epsilon focus interval
+#           -- determine the next reward based on each granular next action
+#           -- use the best next reward for q learning
+
 
 import sys
 try:    # for intellisense
@@ -122,24 +132,36 @@ class QInvestAgent:
             samples = self.rng.choice(mem_list, size=self.recall_sz, replace=False)
         return samples
     
-    def select_action(self, state, ac_range=[0.0, 1.0], ac_granul=21): # <=== NEEDS UPDATE/CLEAN UP
-        # ac_granul: granularity of the action space for q determination/action selection
-        r = self.rng.uniform(low=0, high=1)     # <=== update for focus here
-        if r < self.eps_f_rad:    # completely random action: 
-            # select granular state, select action within epsilon focus
-            action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
-        else:
-            s_idx, s_cent = self.select_eps_center(state)  # decide which epsilon center we should use
+    def select_action(self, state, ac_range=[0.0, 1.0], ac_num=11, verbose=False):
+        # ac_num: granularity of the action space for q determination/action selection
+        # to do: add the option for searching for best action
+        # rationale: get the epsilon state → get the action boundaries → choose action uniformly
+        # 1. select epsilon state:
+        s_idx, s_center = self.select_eps_center(state)
+        if state - s_center > self.eps_f_gran: print(f"Something wrong: state: {state} | ε-state center: {s_center} | diff > {self.eps_f_gran}")
+        # 2. find the focus boundaries 
+        ac_center = self.eps_ac_centers[s_idx]      # later: change this to some kind of dictionary
+        ac_min = max(ac_center - self.eps_f_rad, ac_range[0])   # truncate epsilon focus to admissible actions range
+        ac_max = min(ac_center + self.eps_f_rad, ac_range[1])
+        # 3. uniform selection
+        action = self.rng.uniform(low=ac_min, high=ac_max)
 
-            s_arr = np.array([state] * ac_granul)
-            a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
+        if verbose: print(f"select_action test: state: {state} | s_center: {s_center} | ac_min: {ac_min} | ac_max: {ac_max} | action: {action}")
 
-            sa_arr = np.vstack((s_arr, a_arr)).transpose()  # rows: ac_granul, columns: 2   print(sa_arr.shape)
-            sa_tensor = torch.tensor(sa_arr, dtype=torch.float32)
-            with torch.no_grad():
-                q_arr = self.model(sa_tensor).detach().numpy()[:]
-                idx = np.argmax(q_arr)
-                action = a_arr[idx]
+        # r = self.rng.uniform(low=0, high=1)
+        # if r < self.eps_f_rad:    # completely random action: 
+        #     # select granular state, select action within epsilon focus
+        #     action = self.rng.uniform(low=ac_range[0], high=ac_range[1])
+        # else:
+        #     s_arr = np.array([state] * ac_granul)
+        #     a_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=ac_granul, endpoint=True)
+
+        #     sa_arr = np.vstack((s_arr, a_arr)).transpose()  # rows: ac_granul, columns: 2   print(sa_arr.shape)
+        #     sa_tensor = torch.tensor(sa_arr, dtype=torch.float32)
+        #     with torch.no_grad():
+        #         q_arr = self.model(sa_tensor).detach().numpy()[:]
+        #         idx = np.argmax(q_arr)
+        #         action = a_arr[idx]
         return action
 
     def select_eps_center(self, state, verbose=False):
@@ -484,3 +506,9 @@ if __name__ == '__main__':
 
     # # quick test of epsilon radius and center update
     # agent._update_eps_f(num_ac=11, verbose=True)
+
+    # # quick test of select action
+    # agent.select_action(0.11, verbose=True)
+    # agent.select_action(0.37, verbose=True)
+    # agent.select_action(0.78, verbose=True)
+
