@@ -176,7 +176,7 @@ class QInvestAgent:
         if verbose: print(f"state: {state} | eps idx: {s_idx} | eps state center: {st_cent}")
         return s_idx, st_cent
     
-    def _update_eps_f(self, num_ac=11, verbose=False):    # update epsilon focus: action radius and action centers
+    def _update_eps_foc(self, num_ac=11, verbose=False):    # update epsilon focus: action radius and action centers
         if verbose:
             print(f"eps-foc radius (before): {self.eps_f_rad}")
             print(f"eps-foc states | action centers (before): \n{np.vstack((self.eps_f_states, self.eps_ac_centers)).T}")
@@ -259,14 +259,14 @@ class QInvestAgent:
             s = self.rng.uniform()
             
             self.env.reset(start_cap = s)
-            a = self.select_action(state = s, ac_range=[0, 1], ac_granul=21)
+            a = self.select_action(state = s, ac_range=[0, 1], ac_num=11)
             next_s, _, _ = env.step(bet_size= s * a)
             r = self.state_change_reward(state=s, next_st=next_s)
             tr = Transition(state=s, action=a, reward=r, next_state=next_s)
             self.remember(tr)
             recall_samples = self.rng.permutation(self.recall())
             train_loss = self.learn_step(recall_samples=recall_samples)
-            self._update_eps_f()
+            self._update_eps_foc(num_ac=11)    # <== update epsilon focus centers and radii
 
             if epis % epis_prog == 0:   # progress report logic
                 self.train_loss_hist[epis // epis_prog] = train_loss
@@ -274,10 +274,11 @@ class QInvestAgent:
                     pred = self.model(self.x_valid)[:, 0]
                     loss_v = self.loss_fn(pred, self.y_valid.squeeze())
                     self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
-                print(f"Episode: {epis:{3}}", end = " | ")
+                print(f"Episode: {epis:{3}} ({round(epis / num_epis * 100, 1)} %)", end = " | ")
                 print(f"Training Loss: {self.train_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
                 print(f"Validation Loss: {self.valid_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
-                print(f"Time: {time.time() - start_t:{5}.{4}} s")
+                print(f"ε-foc rad: {self.eps_f_rad:{5}.{4}}", end = " | ")
+                print(f"Time: {time.time() - start_t:{6}.{4}} s")
 
         print(f"Total Training Time: {time.time() - start_t:{5}.{4}} s")
         return self.train_loss_hist, self.valid_loss_hist
@@ -420,8 +421,8 @@ if __name__ == '__main__':
     recall_mech = 'recent' # 'recent' | 'random'
     recall_size = mem_size # // 2
     lr = 2E-5 # 1E-5
-    eps_foc_init = 1.0          # <=== epsilon focus implementation: radius of interval
-    eps_foc_decay = 2 - 1E-3 # 1 - 1E-4
+    eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
+    eps_foc_decay = 1 - 2E-3 # 1 - 1E-4
     eps_foc_min = 0.1
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
@@ -430,7 +431,7 @@ if __name__ == '__main__':
     epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
 
     num_epis = 40_000 // epochs_per_episode
-    epis_prog = 1000 // epochs_per_episode
+    epis_prog = 1_000 // epochs_per_episode
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
