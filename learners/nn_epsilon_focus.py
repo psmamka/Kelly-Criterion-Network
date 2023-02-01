@@ -244,9 +244,9 @@ class QInvestAgent:
     
     def train_qnn(self, num_epis=int(1E5), epis_prog=int(1E3)):
         start_t = time.time()
-        nn.init.xavier_uniform_(self.model[0].weight)
-        # for layer in self.model:    # initialize linear layers
-        #     if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
+        # nn.init.xavier_uniform_(self.model[0].weight)
+        for layer in self.model:    # initialize linear layers
+            if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
 
         self.train_loss_hist = np.zeros(num_epis // epis_prog)
         self.valid_loss_hist = np.zeros(num_epis // epis_prog)
@@ -275,12 +275,14 @@ class QInvestAgent:
                     loss_v = self.loss_fn(pred, self.y_valid.squeeze())
                     self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
                 print(f"Episode: {epis:{3}} ({round(epis / num_epis * 100, 1)} %)", end = " | ")
-                print(f"Training Loss: {self.train_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
-                print(f"Validation Loss: {self.valid_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
+                print(f"Tr. Loss: {self.train_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
+                print(f"Val. Loss: {self.valid_loss_hist[epis // epis_prog]:{9}.{6}}", end = " | ")
                 print(f"ε-foc rad: {self.eps_f_rad:{5}.{4}}", end = " | ")
-                print(f"Time: {time.time() - start_t:{6}.{4}} s")
+                print(f"ε ac-centers minmax: {np.round([min(self.eps_ac_centers), max(self.eps_ac_centers)], 1)}", end = " | ")
+                print(f"Time: {round(time.time() - start_t)} s")
 
-        print(f"Total Training Time: {time.time() - start_t:{5}.{4}} s")
+        print(f"Total Training Time: {round(time.time() - start_t)} s") # :{5}.{4}
+        print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
         return self.train_loss_hist, self.valid_loss_hist
 
     def generate_validation_data(self, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0],  ac_range=[0, 0.99], num_st=20, num_ac=20):
@@ -407,8 +409,8 @@ if __name__ == '__main__':
     # validation
     num_st, num_ac = 10, 21
     # validation data grid
-    st_range = np.array([0.0, 1.0])
-    ac_range = np.array([0.0, 1.0])
+    val_st_range = np.array([0.0, 1.0])
+    val_ac_range = np.array([0.1, 0.9])
     st_minmax = np.array([0.0, 2.0])
     util_func = lambda x: log_util(x, x_reg=1E-3)
     # util_func = lambda x: x
@@ -417,20 +419,22 @@ if __name__ == '__main__':
         n_util_func = QInvestAgent.normalize_util_func(util_func, minmax=st_minmax, num=11, verbose=True)
     else:
         n_util_func = util_func
-    mem_size = int(4E3)     # 4E3 recent, 1E4 for random
+    mem_size = int(1E3)     # 4E3 recent, 1E4 for random
     recall_mech = 'recent' # 'recent' | 'random'
     recall_size = mem_size # // 2
-    lr = 2E-5 # 1E-5
+    lr = 2E-6 # 2E-5 1E-5
+    st_range = np.array([0.0, 1.0])
+    ac_range = np.array([0.0, 1.0])
     eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
-    eps_foc_decay = 1 - 2E-3 # 1 - 1E-4
-    eps_foc_min = 0.1
+    eps_foc_decay = 1 - 1E-3 # 1 - 1E-4
+    eps_foc_min = 0.25   # min action radius
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
-    layers_sz = [10, 10]
+    layers_sz = [10, 10] # [10, 10] [5, 10, 5] [12, 12]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
-    epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
+    epochs_per_episode = 20      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 40_000 // epochs_per_episode
+    num_epis = 100_000 // epochs_per_episode
     epis_prog = 1_000 // epochs_per_episode
 
     # single-bet game
@@ -445,7 +449,7 @@ if __name__ == '__main__':
                         epochs_per_episode=epochs_per_episode)
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
-                                        st_range=st_range, ac_range=ac_range, num_st=num_st, num_ac=num_ac)
+                                        st_range=val_st_range, ac_range=val_ac_range, num_st=num_st, num_ac=num_ac)
     
     agent.train_qnn(num_epis=num_epis, epis_prog=epis_prog)
 
