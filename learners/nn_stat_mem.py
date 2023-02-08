@@ -55,3 +55,73 @@
 # (i)     ACTIONS (j)
 # 
 # 
+
+import sys
+try:    # for intellisense
+    from .. envs import betting_env
+except:
+    sys.path.append('..')
+    from envs import betting_env
+
+import numpy as np
+import torch
+import torch.nn as nn
+from collections import namedtuple, deque
+from torch.utils.data import DataLoader, TensorDataset
+import matplotlib.pyplot as plt
+import time
+
+class StatMemAgent:
+    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), stat_mem_sz=(20, 20),
+                    learn_rate=1E-3, st_range=[0.0, 1.0], ac_range=[0.0, 1.0],  eps_foc_init=1.0, 
+                    eps_foc_decay=0.999, eps_foc_min=0.5, eps_foc_gran=0.1, discount=1.0, layers_sz=[20, 20], 
+                    next_step_lookup=True, epochs_per_episode=1):
+        
+        self.env = env
+        self.util_func = util_func
+        
+        self.rng = rng
+
+        self.in_sz = 2  # state (capital), action (invest ratio)
+        self.out_sz = 1 # Expected utility for a given (s, a) pair
+        self.lr = learn_rate
+
+        # range of state and action values we are training for
+        self.st_range = st_range
+        self.ac_range = ac_range
+        # dividing state and action space to cells (bins). Each cell is represented by the left boundary value
+        self.st_bins = np.linspace(start=st_range[0], stop=st_range[1], num=stat_mem_sz[0], endpoint=False)
+        self.ac_bins = np.linspace(start=ac_range[0], stop=ac_range[1], num=stat_mem_sz[1], endpoint=False)
+        self.bin_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])
+
+        self.statmem_r = np.zeros(stat_mem_sz)   # stat mem reward matrix (average reward per cell)
+        self.statmem_n = np.zeros(stat_mem_sz, dtype=np.uint64)   # stat mem n matrix (number of samples per cell)
+        self._sm_init()                     # stat mem initialization
+
+        self.eps_f_rad = eps_foc_init           # epsilon greedy parameters: radius
+        self.eps_f_dec = eps_foc_decay          # decay rate
+        self.eps_f_min = eps_foc_min            # minimum radius
+        self.eps_f_gran = eps_foc_gran          # granularity for states
+        self._epsilon_focus_init()
+
+        self.gamma = discount
+        self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
+        self.epoc_per_epis = epochs_per_episode
+
+        self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
+
+    def _sm_init(self):
+        # simplest way to initialize the stat mem: have a single sample per each mem cell
+        # we choose cell centers (left boundary + half width) as a smaple
+
+        st_arr = self.st_bins + self.bin_sz[0] / 2.0
+        ac_arr = self.ac_bins + self.bin_sz[1] / 2.0
+
+        for i, st in enumerate(st_arr):
+            for j, ac in enumerate(ac_arr):
+                self.env.reset(start_cap=st)
+                next_st, _, _ = self.env.step(bet_size= st * ac)
+                r = self.state_change_reward(state=st, next_st=next_st)
+                self.statmem_r[i, j] = r
+                self.statmem_n[i, j] = 1
+        
