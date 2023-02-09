@@ -71,8 +71,12 @@ from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 import time
 
+from nn_single_trade_q_learn import log_util
+
+Transition = namedtuple('Transition', ('state', 'action', 'reward'))  # for the stat-mem we only need the s/a/r triplet
+
 class StatMemAgent:
-    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), stat_mem_sz=(20, 20),
+    def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), stat_mem_sz=(100, 100),
                     learn_rate=1E-3, st_range=[0.0, 1.0], ac_range=[0.0, 1.0],  eps_foc_init=1.0, 
                     eps_foc_decay=0.999, eps_foc_min=0.5, eps_foc_gran=0.1, discount=1.0, layers_sz=[20, 20], 
                     next_step_lookup=True, epochs_per_episode=1):
@@ -92,11 +96,11 @@ class StatMemAgent:
         # dividing state and action space to cells (bins). Each cell is represented by the left boundary value
         self.st_bins = np.linspace(start=st_range[0], stop=st_range[1], num=stat_mem_sz[0], endpoint=False)
         self.ac_bins = np.linspace(start=ac_range[0], stop=ac_range[1], num=stat_mem_sz[1], endpoint=False)
-        self.bin_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])
+        self.cel_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])    # size of individual memory cells
 
         self.statmem_r = np.zeros(stat_mem_sz)   # stat mem reward matrix (average reward per cell)
         self.statmem_n = np.zeros(stat_mem_sz, dtype=np.uint64)   # stat mem n matrix (number of samples per cell)
-        self._sm_init()                     # stat mem initialization
+        self._statmem_init()                     # stat mem initialization
 
         self.eps_f_rad = eps_foc_init           # epsilon greedy parameters: radius
         self.eps_f_dec = eps_foc_decay          # decay rate
@@ -110,12 +114,11 @@ class StatMemAgent:
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
 
-    def _sm_init(self):
+    def _statmem_init(self):
         # simplest way to initialize the stat mem: have a single sample per each mem cell
-        # we choose cell centers (left boundary + half width) as a smaple
-
-        st_arr = self.st_bins + self.bin_sz[0] / 2.0
-        ac_arr = self.ac_bins + self.bin_sz[1] / 2.0
+        # we choose cell centers (left boundary + half width) as initial samples
+        st_arr = self.st_bins + self.cel_sz[0] / 2.0
+        ac_arr = self.ac_bins + self.cel_sz[1] / 2.0
 
         for i, st in enumerate(st_arr):
             for j, ac in enumerate(ac_arr):
@@ -124,4 +127,50 @@ class StatMemAgent:
                 r = self.state_change_reward(state=st, next_st=next_st)
                 self.statmem_r[i, j] = r
                 self.statmem_n[i, j] = 1
+    
+    def state_change_reward(self, state, next_st):
+        return self.util_func(next_st) - self.util_func(state)    # utility reward
+    
+    def _epsilon_focus_init(self, verbose=False):
+        # number of epsilon centers to keep track of: (st_max - st_min) / epsilon_granularity + 1 
+        # (+1 because exclusive of boundaries)
+        num_eps_states = int((self.st_range[1] - self.st_range[0]) / self.eps_f_gran + 1)
+        self.eps_f_states = np.linspace(self.st_range[0], self.st_range[1], num_eps_states, endpoint= True)
+        avg_action = (self.ac_range[1] - self.ac_range[0]) / 2.0    # middle point for possible actions used for init
+        self.eps_ac_centers = np.ones(num_eps_states) * avg_action
+        if verbose:
+            print(f"eps_f granular states: {self.eps_f_states} \neps_f action centers: {self.eps_ac_centers}")
+
+    def build_qnn(self, in_sz=2, out_sz=1, layers_sz=[20, 20]):
+        layer_list = []
+        layer_sizes = zip([in_sz] + list(layers_sz), list(layers_sz) + [out_sz])
+
+        for idx, (num_in, num_out) in enumerate(layer_sizes):
+            layer_list.append(nn.Linear(num_in, num_out))
+               # rectifier layer: ReLU() | LeakyReLU(negative_slope=0.1) | Sigmoid() | 
+            if idx < len(layers_sz): layer_list.append(nn.ReLU())
+
+        self.model = nn.Sequential(*layer_list) # print(self.model)
+
+        self.loss_fn = nn.MSELoss()   # MSELoss() | L1Loss() | CrossEntropyLoss() | BCELoss()
+        # reduction = 'mean' (default) | 'none' | 'sum'
+        # optimizer:s SGD | Adam
+        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=self.lr, weight_decay=0.0)
         
+    def remember(self, tr):
+        i = self.get_state_index(tr.state)      # consider refactoring to one method 
+        j = self.get_action_index(tr.action)    # ←
+        old_r, old_n = self.statmem_r[i, j], self.statmem_n[i, j]
+        
+        # new_avg_r = (n * old_avg_r + new_r) / (n + 1)   ← can use a different formula to consider recency
+        self.statmem_r[i, j] = (old_n * old_r + tr.reward) / (old_n + 1)
+        self.statmem_n[i, j] = old_n + 1
+    
+    def get_state_index(self, st):
+        # index = floor( (x - min_x) / x_step)      floor 
+        st_idx = np.floor((st - self.st_range[0]) / self.cel_sz[0]).astype(np.uint64)
+        return st_idx
+    
+    def get_action_index(self, ac):
+        ac_idx = np.floor((ac - self.ac_range[0]) / self.cel_sz[1]).astype(np.uint64)
+        return ac_idx
