@@ -56,6 +56,16 @@
 # 
 # 
 
+#   Integration of statistical memory with epsilon-focus strategy
+# 
+#   * first: the epsilon action radius need to span multiple cells in the action dimension,
+#       in order to achieve proper sampling
+#   * second: it makes sense to have epsilonaction centers coincide with memory
+#       cell action centers
+#   * third: it might be advantageous to use some kind of normal/flat distribution, with σ set to
+#       radius and μ to action center, to allow for sufficient sampling from distant actions
+#   * fourth: for simplicity sake, we can keep epsilon state centers as memroy cell state centers 
+
 import sys
 try:    # for intellisense
     from .. envs import betting_env
@@ -158,19 +168,50 @@ class StatMemAgent:
         self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=self.lr, weight_decay=0.0)
         
     def remember(self, tr):
-        i = self.get_state_index(tr.state)      # consider refactoring to one method 
-        j = self.get_action_index(tr.action)    # ←
+        i = self.get_state_mem_index(tr.state)      # consider refactoring to one method 
+        j = self.get_action_mem_index(tr.action)    # ←
         old_r, old_n = self.statmem_r[i, j], self.statmem_n[i, j]
         
         # new_avg_r = (n * old_avg_r + new_r) / (n + 1)   ← can use a different formula to consider recency
         self.statmem_r[i, j] = (old_n * old_r + tr.reward) / (old_n + 1)
         self.statmem_n[i, j] = old_n + 1
     
-    def get_state_index(self, st):
-        # index = floor( (x - min_x) / x_step)      floor 
+    def get_state_mem_index(self, st):
+        # index = floor( (x - min_x) / x_step)  → floor returns float, cast to uint
         st_idx = np.floor((st - self.st_range[0]) / self.cel_sz[0]).astype(np.uint64)
         return st_idx
     
-    def get_action_index(self, ac):
+    def get_action_mem_index(self, ac):
         ac_idx = np.floor((ac - self.ac_range[0]) / self.cel_sz[1]).astype(np.uint64)
         return ac_idx
+
+    def recall(self):
+        # for stat-mem, we need all cells. Just return linearized avg_r and n martices
+        return self.statmem_r.flatten(), self.statmem_n.flatten()
+
+    def select_action(self, state, verbose=False):
+        # Here epsilon-focus and statistical memory need to be integrated
+        # ...
+        return
+
+# ===== Execution =====
+if __name__ == '__main__':
+    rng = np.random.default_rng()
+    torch.manual_seed(1)
+
+    # betting env properties
+    prob_arr = np.array([0.3, 0.7]) #
+    outcome_arr = np.array([0.0, 2.0])
+    # validation
+    num_st, num_ac = 10, 21
+    # validation data grid
+    val_st_range = np.array([0.1, 1.0])
+    val_ac_range = np.array([0.1, 0.9])
+    st_minmax = np.array([0.0, 2.0])
+    util_func = lambda x: log_util(x, x_reg=1E-3)
+    # util_func = lambda x: x
+    normalize_uf = True     # True: Normalize utility function to [-1 +1] range | False: use raw util func
+    if normalize_uf: 
+        n_util_func = StatMemAgent.normalize_util_func(util_func, minmax=st_minmax, num=11, verbose=True)
+    else:
+        n_util_func = util_func
