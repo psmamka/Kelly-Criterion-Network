@@ -209,7 +209,17 @@ class StatMemAgent:
         # 3. uniform selection within the epsilon range
         # Note: alternatively we can do uniform discrete selection from bins within the range 
         action = self.rng.uniform(low=ac_min, high=ac_max)
+
+        if verbose: print(f"select_action test: state: {state} | s_index: {i} | ac_min: {ac_min} | ac_max: {ac_max} | action: {action}")
         return action
+    
+    def _update_eps_foc(self, verbose=False):    # update epsilon focus: only the action radius
+        old_rad = self.eps_f_rad
+        # update epsilon radius
+        if self.eps_f_rad > self.eps_f_min: self.eps_f_rad *= self.eps_f_dec
+
+        if verbose: print(f"eps-foc radius update done, before: {old_rad} | after: {self.eps_f_rad}")
+        
 
 # ===== Execution =====
 if __name__ == '__main__':
