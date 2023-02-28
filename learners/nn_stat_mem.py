@@ -143,7 +143,8 @@ class StatMemAgent:
     
     def _epsilon_focus_init(self, verbose=False):
         # number of epsilon centers to keep track of: (st_max - st_min) / epsilon_granularity + 1 
-        # (+1 because exclusive of boundaries)
+        # (+1 because inclusive of boundaries)
+        # Note: it might make sense to have the same number epsilon centers and stat mem states
         num_eps_states = int((self.st_range[1] - self.st_range[0]) / self.eps_f_gran + 1)
         self.eps_f_states = np.linspace(self.st_range[0], self.st_range[1], num_eps_states, endpoint= True)
         avg_action = (self.ac_range[1] - self.ac_range[0]) / 2.0    # middle point for possible actions used for init
@@ -151,7 +152,7 @@ class StatMemAgent:
         if verbose:
             print(f"eps_f granular states: {self.eps_f_states} \neps_f action centers: {self.eps_ac_centers}")
 
-    def build_qnn(self, in_sz=2, out_sz=1, layers_sz=[20, 20]):
+    def _build_qnn(self, in_sz=2, out_sz=1, layers_sz=[20, 20]):
         layer_list = []
         layer_sizes = zip([in_sz] + list(layers_sz), list(layers_sz) + [out_sz])
 
@@ -177,7 +178,7 @@ class StatMemAgent:
         self.statmem_n[i, j] = old_n + 1
     
     def get_state_mem_index(self, st):
-        # index = floor( (x - min_x) / x_step)  → floor returns float, cast to uint
+        # index = floor( (x - min_x) / x_step )  → floor returns float, cast to uint
         st_idx = np.floor((st - self.st_range[0]) / self.cel_sz[0]).astype(np.uint64)
         return st_idx
     
@@ -191,8 +192,24 @@ class StatMemAgent:
 
     def select_action(self, state, verbose=False):
         # Here epsilon-focus and statistical memory need to be integrated
-        # ...
-        return
+        # One approach is to use a normal/gaussian dist with stan.dev of epsilon
+        #   - for values returned outside the admissible action range, choose one inside uniformly
+        # Another approach is to repurpose the uniform epsilon interval for stat mem
+        #   - here values are chosen uniformly within an epsilon radius interval
+        #   - the problem is that the values outside the radius at some point never get sampled again
+        #   - so we may miss optimal solutions if epsilon shrinks too fast
+
+        i = self.get_state_mem_index(state)
+        # 1. find the action center (optimal bin)
+        j = np.argmax(self.statmem_r[i, :])     # get the optimal action mem index
+        ac_center = self.ac_bins[j] + 0.5 * self.cel_sz[1]  # second term for shifting from the bin left boundary to center
+        # 2. set the focus boundaries: truncate to admissible action boundaries
+        ac_min = max(ac_center - self.eps_f_rad, self.ac_range[0])   
+        ac_max = min(ac_center + self.eps_f_rad, self.ac_range[1])
+        # 3. uniform selection within the epsilon range
+        # Note: alternatively we can do uniform discrete selection from bins within the range 
+        action = self.rng.uniform(low=ac_min, high=ac_max)
+        return action
 
 # ===== Execution =====
 if __name__ == '__main__':
