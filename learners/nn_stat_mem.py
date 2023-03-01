@@ -93,9 +93,12 @@ class StatMemAgent:
         
         self.env = env
         self.util_func = util_func
-        
+        # random number generator
         self.rng = rng
-
+        # statistical memory grid size:
+        self.stat_mem_sz = stat_mem_sz
+        self.stat_mem_len = stat_mem_sz[0] * stat_mem_sz[1]
+        # neural network in/out 
         self.in_sz = 2  # state (capital), action (invest ratio)
         self.out_sz = 1 # Expected utility for a given (s, a) pair
         self.lr = learn_rate
@@ -103,10 +106,12 @@ class StatMemAgent:
         # range of state and action values we are training for
         self.st_range = st_range
         self.ac_range = ac_range
-        # dividing state and action space to cells (bins). Each cell is represented by the left boundary value
-        self.st_bins = np.linspace(start=st_range[0], stop=st_range[1], num=stat_mem_sz[0], endpoint=False)
-        self.ac_bins = np.linspace(start=ac_range[0], stop=ac_range[1], num=stat_mem_sz[1], endpoint=False)
-        self.cel_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])    # size of individual memory cells
+        # dividing state and action space to cells (bins). Each cell is represented by the bin <center> value
+        self.cel_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])    # the 2D size of individual memory cells
+        self.st_bins = np.linspace(start=st_range[0], stop=st_range[1], num=stat_mem_sz[0], endpoint=False) + \
+                            0.5 * self.cel_sz[0]
+        self.ac_bins = np.linspace(start=ac_range[0], stop=ac_range[1], num=stat_mem_sz[1], endpoint=False) + \
+                            0.5 * self.cel_sz[1]
 
         self.statmem_r = np.zeros(stat_mem_sz)   # stat mem reward matrix (average reward per cell)
         self.statmem_n = np.zeros(stat_mem_sz, dtype=np.uint64)   # stat mem n matrix (number of samples per cell)
@@ -127,8 +132,8 @@ class StatMemAgent:
     def _statmem_init(self):
         # simplest way to initialize the stat mem: have a single sample per each mem cell
         # we choose cell centers (left boundary + half width) as initial samples
-        st_arr = self.st_bins + self.cel_sz[0] / 2.0
-        ac_arr = self.ac_bins + self.cel_sz[1] / 2.0
+        st_arr = self.st_bins # + self.cel_sz[0] / 2.0  
+        ac_arr = self.ac_bins # + self.cel_sz[1] / 2.0
 
         for i, st in enumerate(st_arr):
             for j, ac in enumerate(ac_arr):
@@ -202,7 +207,7 @@ class StatMemAgent:
         i = self.get_state_mem_index(state)
         # 1. find the action center (optimal bin)
         j = np.argmax(self.statmem_r[i, :])     # get the optimal action mem index
-        ac_center = self.ac_bins[j] + 0.5 * self.cel_sz[1]  # second term for shifting from the bin left boundary to center
+        ac_center = self.ac_bins[j] # + 0.5 * self.cel_sz[1]
         # 2. set the focus boundaries: truncate to admissible action boundaries
         ac_min = max(ac_center - self.eps_f_rad, self.ac_range[0])   
         ac_max = min(ac_center + self.eps_f_rad, self.ac_range[1])
@@ -220,6 +225,35 @@ class StatMemAgent:
 
         if verbose: print(f"eps-foc radius update done, before: {old_rad} | after: {self.eps_f_rad}")
         
+    def learn_step(self):
+        # Here the `recall samples` are the stat-mem cells, propely weighted
+        recall_inputs, recall_targets = [], []
+        recall_len = self.stat_mem_len
+
+        if self.next_lookup: # the q method: use predictions for the next steps
+            print("Needs to be done later!!!")
+        else:
+            recall_st, recall_ac = np.meshgrid(self.st_bins, self.ac_bins, indexing='ij')   # check the indexing
+            recall_inputs = np.hstack((recall_st.reshape(recall_len, 1), recall_ac.reshape(recall_len, 1)))
+            recall_targets = self.statmem_r.reshape(recall_len)
+
+            # for now not using the multiplicity (statmem_n)
+            train_dataset = TensorDataset(torch.tensor(recall_inputs, dtype=torch.float32), 
+                                            torch.tensor(recall_targets, dtype=torch.float32))
+            train_dl = DataLoader(train_dataset, batch_size=len(recall_targets), shuffle=True)
+        
+        for epoch in range(self.epoc_per_epis):
+            for x_b, y_b in train_dl:   # bathces
+                # recall_pred = self.model(torch.tensor(recall_inputs, dtype=torch.float32)).squeeze()  # [0]
+                # loss = self.loss_fn(recall_pred, torch.stack(recall_targets, dim=0))
+                pred = self.model(x_b)[:, 0]
+                loss = self.loss_fn(pred, y_b.squeeze())
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+        return loss.item()
+
 
 # ===== Execution =====
 if __name__ == '__main__':
