@@ -227,7 +227,7 @@ class StatMemAgent:
         
     def learn_step(self):
         # Here the `recall samples` are the stat-mem cells, propely weighted
-        recall_inputs, recall_targets = [], []
+        # recall_inputs, recall_targets = [], []
         recall_len = self.stat_mem_len
 
         if self.next_lookup: # the q method: use predictions for the next steps
@@ -253,6 +253,54 @@ class StatMemAgent:
                 self.optimizer.zero_grad()
 
         return loss.item()
+    
+    def train_nn(self, num_epis=int(1E5), epis_prog=int(1E3)):
+        start_t = time.time()
+        # nn.init.xavier_uniform_(self.model[0].weight)
+        for layer in self.model:    # initialize linear layers
+            if type(layer) == nn.Linear: nn.init.xavier_uniform_(layer.weight)
+
+        self.train_loss_hist = np.zeros(num_epis // epis_prog)
+        self.valid_loss_hist = np.zeros(num_epis // epis_prog)
+
+        if self.x_valid is None or self.y_valid is None:
+            raise Exception("validation data need to be initialized")
+
+        for epis in range(num_epis):
+            # single episode logic:
+            # (1) initialize env state
+            # (2) select action
+            # (3) get reward
+            # (4) remember transition
+            # (5) train network
+            # (6) update epsilon-focus
+            s = self.rng.uniform(low=self.st_range[0], high=self.st_range[1])
+            self.env.reset(start_cap = s)
+            
+            a = self.select_action(state = s)
+            next_s, _, _ = self.env.step(bet_size= s * a)
+            r = self.state_change_reward(state=s, next_st=next_s)
+            tr = Transition(state=s, action=a, reward=r) #, next_state=next_s)
+            self.remember(tr)
+            train_loss = self.learn_step()
+            self._update_eps_foc()    # <== update epsilon focus radii
+
+            if epis % epis_prog == 0:   # progress report logic
+                self.train_loss_hist[epis // epis_prog] = train_loss
+                with torch.no_grad():
+                    pred = self.model(self.x_valid)[:, 0]
+                    loss_v = self.loss_fn(pred, self.y_valid.squeeze())
+                    self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
+                print(f"Episode: {epis:{3}} ({round(epis / num_epis * 100, 1)} %)", end = " | ")
+                print(f"T. Loss: {self.train_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
+                print(f"V. Loss: {self.valid_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
+                print(f"ε-foc rad: {self.eps_f_rad:{5}.{4}}", end = " | ")
+                print(f"ε ac-cent minmax: {np.round([min(self.eps_ac_centers), max(self.eps_ac_centers)], 1)}", end = " | ")
+                print(f"Time: {round(time.time() - start_t)} s")
+
+        print(f"Total Training Time: {round(time.time() - start_t)} s") # :{5}.{4}
+        print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
+        return self.train_loss_hist, self.valid_loss_hist
 
 
 # ===== Execution =====
