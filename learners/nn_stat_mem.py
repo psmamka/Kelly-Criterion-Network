@@ -302,6 +302,18 @@ class StatMemAgent:
         print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
         return self.train_loss_hist, self.valid_loss_hist
 
+    def generate_validation_data(self, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0],  ac_range=[0, 0.99], num_st=20, num_ac=20):
+        st_arr = np.linspace(start=st_range[0], stop=st_range[1], num=num_st, endpoint=True)
+        ac_arr = np.linspace(start=ac_range[0], stop=ac_range[1], num=num_ac, endpoint=True)
+
+        ss, aa = np.meshgrid(st_arr, ac_arr, indexing='ij')
+
+        x_valid = np.array(list(zip(ss.reshape(num_st * num_ac,), aa.reshape(num_st * num_ac,))))
+        y_valid = self.__class__.get_determ_reward(x_valid, prob_arr, outcome_arr, util_func)
+        # self.x_valid, self.y_valid = torch.tensor(x_valid, dtype=torch.float32), torch.tensor(y_valid, dtype=torch.float32)
+        self.x_valid, self.y_valid = map(lambda u: torch.tensor(u, dtype=torch.float32), [x_valid, y_valid])
+        self.num_st_val, self.num_ac_val = num_st, num_ac
+        return self.x_valid, self.y_valid
     
 
     @classmethod
@@ -350,20 +362,20 @@ if __name__ == '__main__':
         n_util_func = util_func
     
     stat_mem_sz=(100, 100)
-    lr = 1E-6 # 2E-5 1E-5
+    lr = 2E-5 # 2E-5 1E-5
     st_range = np.array([0.0, 1.0])
     ac_range = np.array([0.0, 1.0])
     eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
-    eps_foc_decay = 1 - 1E-3 # 1 - 1E-3
-    eps_foc_min = 0.3   # min action radius
+    eps_foc_decay = 1 - 1E-2 # 1 - 1E-3
+    eps_foc_min = 0.2   # min action radius
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
     layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
     epochs_per_episode = 20      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 100_000 // epochs_per_episode
-    epis_prog = 1_000 // epochs_per_episode
+    num_epis = 5_000 // epochs_per_episode
+    epis_prog = 100 // epochs_per_episode
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
@@ -374,6 +386,11 @@ if __name__ == '__main__':
                         ac_range=ac_range, st_range=st_range, eps_foc_init=eps_foc_init, eps_foc_decay=eps_foc_decay, 
                         eps_foc_min=eps_foc_min, eps_foc_gran=eps_foc_gran, discount=gamma, layers_sz=layers_sz, 
                         next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
+
+    agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
+                                        st_range=val_st_range, ac_range=val_ac_range, num_st=num_st, num_ac=num_ac)
+    
+    agent.train_nn(num_epis=num_epis, epis_prog=epis_prog)
     
 
     # === ↓ Quick Tests Here ↓ ===
