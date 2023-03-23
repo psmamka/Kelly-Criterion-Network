@@ -107,7 +107,7 @@ class StatMemAgent:
         self.st_range = st_range
         self.ac_range = ac_range
         # dividing state and action space to cells (bins). Each cell is represented by the bin <center> value
-        self.cel_sz = (st_range / stat_mem_sz[0], ac_range / stat_mem_sz[1])    # the 2D size of individual memory cells
+        self.cel_sz = (st_range[1] / stat_mem_sz[0], ac_range[1] / stat_mem_sz[1])    # the 2D size of individual memory cells
         self.st_bins = np.linspace(start=st_range[0], stop=st_range[1], num=stat_mem_sz[0], endpoint=False) + \
                             0.5 * self.cel_sz[0]
         self.ac_bins = np.linspace(start=ac_range[0], stop=ac_range[1], num=stat_mem_sz[1], endpoint=False) + \
@@ -302,6 +302,30 @@ class StatMemAgent:
         print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
         return self.train_loss_hist, self.valid_loss_hist
 
+    
+
+    @classmethod
+    def normalize_util_func(cls, u_func, minmax=[0, 1], num=101, verbose=False):
+        st_arr = np.linspace(minmax[0], minmax[1], num, endpoint=True)
+        util_arr = u_func(st_arr)
+        uf_max, uf_min = max(util_arr), min(util_arr)
+        diff, avg = uf_max - uf_min, (uf_max + uf_min) / 2.0
+        normalized_uf = lambda x: (u_func(x) - avg) / diff
+        if verbose: print(f"avg: {avg} | diff: {diff}")
+        return normalized_uf
+
+    @classmethod
+    def get_determ_reward(cls, x_in, prob_arr, outcome_arr, util_func):
+        y = np.zeros(len(x_in))
+        p_arr, o_arr = np.array(prob_arr), np.array(outcome_arr)
+        for idx, (s, a) in enumerate(x_in):
+            # print((1-x) * np.ones(len(o_arr)) + x * o_arr)
+            #                                    ↓ amount not risked ↓   +   ↓ amount risked ↓  -  ↓ util before bet ↓
+            y[idx] = np.sum(p_arr * util_func(s * (1-a) * np.ones(len(o_arr)) + s * a * o_arr) - \
+                            p_arr * util_func(s * np.ones(len(o_arr))))
+        return y
+
+
 
 # ===== Execution =====
 if __name__ == '__main__':
@@ -324,3 +348,34 @@ if __name__ == '__main__':
         n_util_func = StatMemAgent.normalize_util_func(util_func, minmax=st_minmax, num=11, verbose=True)
     else:
         n_util_func = util_func
+    
+    stat_mem_sz=(100, 100)
+    lr = 1E-6 # 2E-5 1E-5
+    st_range = np.array([0.0, 1.0])
+    ac_range = np.array([0.0, 1.0])
+    eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
+    eps_foc_decay = 1 - 1E-3 # 1 - 1E-3
+    eps_foc_min = 0.3   # min action radius
+    eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
+    gamma = 0.0
+    layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15]
+    next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
+    epochs_per_episode = 20      # number of cycles of training in self.learn_step per episode/call
+
+    num_epis = 100_000 // epochs_per_episode
+    epis_prog = 1_000 // epochs_per_episode
+
+    # single-bet game
+    env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
+                                        start_cap=1, max_cap=st_minmax[1], min_cap=st_minmax[0], max_steps=1, 
+                                        log_returns=False)
+
+    agent = StatMemAgent(env=env, rng=rng, util_func=n_util_func, stat_mem_sz=stat_mem_sz, learn_rate=lr,
+                        ac_range=ac_range, st_range=st_range, eps_foc_init=eps_foc_init, eps_foc_decay=eps_foc_decay, 
+                        eps_foc_min=eps_foc_min, eps_foc_gran=eps_foc_gran, discount=gamma, layers_sz=layers_sz, 
+                        next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
+    
+
+    # === ↓ Quick Tests Here ↓ ===
+
+
