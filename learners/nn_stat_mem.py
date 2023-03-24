@@ -121,7 +121,7 @@ class StatMemAgent:
         self.eps_f_dec = eps_foc_decay          # decay rate
         self.eps_f_min = eps_foc_min            # minimum radius
         self.eps_f_gran = eps_foc_gran          # granularity for states
-        self._epsilon_focus_init()
+        # self._epsilon_focus_init()
 
         self.gamma = discount
         self.next_lookup = next_step_lookup   # q: predictions of next step used for current step optimization
@@ -146,7 +146,7 @@ class StatMemAgent:
     def state_change_reward(self, state, next_st):
         return self.util_func(next_st) - self.util_func(state)    # utility reward
     
-    def _epsilon_focus_init(self, verbose=False):
+    def _epsilon_focus_init(self, verbose=False):   # might be deprecated with stat mem
         # number of epsilon centers to keep track of: (st_max - st_min) / epsilon_granularity + 1 
         # (+1 because inclusive of boundaries)
         # Note: it might make sense to have the same number epsilon centers and stat mem states
@@ -224,6 +224,9 @@ class StatMemAgent:
         if self.eps_f_rad > self.eps_f_min: self.eps_f_rad *= self.eps_f_dec
 
         if verbose: print(f"eps-foc radius update done, before: {old_rad} | after: {self.eps_f_rad}")
+
+        # update the action centers
+
         
     def learn_step(self):
         # Here the `recall samples` are the stat-mem cells, propely weighted
@@ -292,14 +295,14 @@ class StatMemAgent:
                     loss_v = self.loss_fn(pred, self.y_valid.squeeze())
                     self.valid_loss_hist[epis // epis_prog] = loss_v.item() # / self.y_valid.size()[0]
                 print(f"Episode: {epis:{3}} ({round(epis / num_epis * 100, 1)} %)", end = " | ")
-                print(f"T. Loss: {self.train_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
-                print(f"V. Loss: {self.valid_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
+                print(f"Tr. Loss: {self.train_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
+                print(f"Val. Loss: {self.valid_loss_hist[epis // epis_prog]:{8}.{6}}", end = " | ")
                 print(f"ε-foc rad: {self.eps_f_rad:{5}.{4}}", end = " | ")
-                print(f"ε ac-cent minmax: {np.round([min(self.eps_ac_centers), max(self.eps_ac_centers)], 1)}", end = " | ")
+                # print(f"ε ac-cent minmax: {np.round([min(self.eps_ac_centers), max(self.eps_ac_centers)], 1)}", end = " | ")
                 print(f"Time: {round(time.time() - start_t)} s")
 
         print(f"Total Training Time: {round(time.time() - start_t)} s") # :{5}.{4}
-        print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
+        # print("ε-focus action centers:\n", ' '.join(["{:.2f}".format(eac) for eac in self.eps_ac_centers]))
         return self.train_loss_hist, self.valid_loss_hist
 
     def generate_validation_data(self, prob_arr, outcome_arr, util_func, st_range=[0.0, 1.0],  ac_range=[0, 0.99], num_st=20, num_ac=20):
@@ -314,8 +317,87 @@ class StatMemAgent:
         self.x_valid, self.y_valid = map(lambda u: torch.tensor(u, dtype=torch.float32), [x_valid, y_valid])
         self.num_st_val, self.num_ac_val = num_st, num_ac
         return self.x_valid, self.y_valid
-    
 
+    def plot_performance(self, show_legends=True, num_st=11, num_ac=11):
+        if self.x_valid is None or self.y_valid is None:
+            raise Exception("validation data need to be initialized")
+        
+        with torch.no_grad():
+            y_pred = self.model(self.x_valid)[:, 0]
+
+        plt.figure(figsize=(10, 5))
+
+        ax = plt.subplot(1, 2, 1)    # validation data plot
+        print(self.x_valid.shape, self.y_valid.shape, y_pred.shape)   # torch.Size([400, 2]) torch.Size([400]) torch.Size([400])
+        x_valid = self.x_valid.detach().numpy()
+        y_valid = self.y_valid.detach().numpy()
+        # plt.plot(x_valid[-num_ac:, 1], y_valid[-num_ac:])
+        # print(x_valid[0:self.num_st_val * self.num_ac_val:self.num_ac_val, 0].squeeze())
+
+        legends = [f"s = {z:{3}.{2}}" for z in x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0]]
+        # print(legends)
+
+        for s_idx in range(self.num_st_val):
+            idx = s_idx * self.num_ac_val
+            plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_valid[idx:idx + self.num_ac_val], label=legends[s_idx])
+        plt.title("Validation Data")
+        plt.xlabel("Investment Fraction")
+        handles, _ = ax.get_legend_handles_labels()
+        if show_legends: ax.legend([handles[0], handles[-1]], [legends[0], legends[-1]])
+        # if show_legends:
+        #     plt.legend(x_valid[0:self.num_st_val * self.num_ac_val: self.num_ac_val, 0])   # labels/legends for different s value
+
+        ax2 = plt.subplot(1, 2, 2)    # performance data plot
+        y_pred  = y_pred.detach().numpy()
+        for s_idx in range(self.num_st_val):
+            idx = s_idx * self.num_ac_val
+            plt.plot(x_valid[idx:idx + self.num_ac_val, 1], y_pred[idx:idx + self.num_ac_val], label=legends[s_idx])
+            # plt.plot(x_valid[0:num_ac, 1], y_pred[idx:idx + num_ac])
+        plt.title(f"Model Performance\nLearning Rate: {lr}")
+        plt.xlabel("Investment Fraction")
+        
+        handles, _ = ax2.get_legend_handles_labels()
+        if show_legends: ax2.legend([handles[0], handles[-1]], [legends[0], legends[-1]])
+        plt.show()
+
+        y_2d_test =  y_valid.reshape((num_st, num_ac))
+        y_2d_pred =  y_pred.reshape((num_st, num_ac))
+        num_levs = 25
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.contourf(y_2d_test, levels=num_levs)
+        plt.colorbar()
+        plt.title(f"Target Contour")
+        plt.xlabel("Action: Investment Fraction")
+        plt.ylabel("State: Capital")
+        plt.xticks(ticks=np.arange(num_ac), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_ac, endpoint=True)])
+        plt.yticks(ticks=np.arange(num_st), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_st, endpoint=True)])
+        # plt.legend(["Model", "Theory"])
+        plt.subplot(1, 2, 2)
+        plt.contourf(y_2d_pred, levels=num_levs)
+        plt.colorbar()
+        plt.title(f"Predicted Contour")
+        plt.xlabel("Action: Investment Fraction")
+        plt.ylabel("State: Capital")
+        plt.xticks(ticks=np.arange(num_ac), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_ac, endpoint=True)])
+        plt.yticks(ticks=np.arange(num_st), labels=[f"{z:{4}.{2}}" for z in np.linspace(0, 1, num=num_st, endpoint=True)])
+
+        plt.show()
+
+    def plot_training_history(self, epis_prog=1000):
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(np.arange(len(self.train_loss_hist)) * epis_prog + 1, self.train_loss_hist)
+        plt.title(f"Q-NN Performance History: Training\nStat Memory: {self.stat_mem_sz}")
+        plt.xlabel("Epochs")
+        plt.ylabel("Loss")
+        plt.subplot(1, 2, 2) 
+        plt.plot(np.arange(len(self.valid_loss_hist)) * epis_prog + 1, self.valid_loss_hist)
+        plt.title(f"Q-NN Performance History: Validation")
+        plt.xlabel("Epochs")
+        plt.ylabel("Loss")
+        plt.show()
+    
     @classmethod
     def normalize_util_func(cls, u_func, minmax=[0, 1], num=101, verbose=False):
         st_arr = np.linspace(minmax[0], minmax[1], num, endpoint=True)
@@ -362,17 +444,17 @@ if __name__ == '__main__':
         n_util_func = util_func
     
     stat_mem_sz=(100, 100)
-    lr = 2E-5 # 2E-5 1E-5
+    lr = 3E-5 # 2E-5 1E-5
     st_range = np.array([0.0, 1.0])
     ac_range = np.array([0.0, 1.0])
     eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
-    eps_foc_decay = 1 - 1E-2 # 1 - 1E-3
-    eps_foc_min = 0.2   # min action radius
+    eps_foc_decay = 1 - 5E-3 # 1 - 1E-3
+    eps_foc_min = 0.3   # min action radius
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
     layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
-    epochs_per_episode = 20      # number of cycles of training in self.learn_step per episode/call
+    epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
 
     num_epis = 5_000 // epochs_per_episode
     epis_prog = 100 // epochs_per_episode
@@ -392,6 +474,9 @@ if __name__ == '__main__':
     
     agent.train_nn(num_epis=num_epis, epis_prog=epis_prog)
     
+    agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
+
+    agent.plot_training_history(epis_prog=epis_prog)
 
     # === ↓ Quick Tests Here ↓ ===
 
