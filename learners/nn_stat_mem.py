@@ -443,21 +443,21 @@ if __name__ == '__main__':
     else:
         n_util_func = util_func
     
-    stat_mem_sz=(100, 100)
-    lr = 3E-5 # 2E-5 1E-5
+    stat_mem_sz = (25, 25)  # (100, 100)
+    lr = 2E-5 # 2E-5 1E-5
     st_range = np.array([0.0, 1.0])
     ac_range = np.array([0.0, 1.0])
     eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
-    eps_foc_decay = 1 - 5E-3 # 1 - 1E-3
+    eps_foc_decay = 1 - 1E-4 # 1 - 1E-3
     eps_foc_min = 0.3   # min action radius
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
-    layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15]
+    layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15] [17, 17] [20, 20]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
-    epochs_per_episode = 10      # number of cycles of training in self.learn_step per episode/call
+    epochs_per_episode = 1      # number of cycles of training in self.learn_step per episode/call
 
-    num_epis = 5_000 // epochs_per_episode
-    epis_prog = 100 // epochs_per_episode
+    num_epis = 40_000 // epochs_per_episode
+    epis_prog = 1_000 // epochs_per_episode
 
     # single-bet game
     env = betting_env.BettingEnvBinary(win_pr=prob_arr[1], loss_pr=prob_arr[0], win_fr=1.0, loss_fr=1.0, 
