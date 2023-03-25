@@ -389,14 +389,25 @@ class StatMemAgent:
         plt.figure(figsize=(10, 5))
         plt.subplot(1, 2, 1)
         plt.plot(np.arange(len(self.train_loss_hist)) * epis_prog + 1, self.train_loss_hist)
-        plt.title(f"Q-NN Performance History: Training\nStat Memory: {self.stat_mem_sz}")
+        plt.title(f"Stat-NN Performance History: Training\nStat Memory: {self.stat_mem_sz}")
         plt.xlabel("Epochs")
         plt.ylabel("Loss")
         plt.subplot(1, 2, 2) 
         plt.plot(np.arange(len(self.valid_loss_hist)) * epis_prog + 1, self.valid_loss_hist)
-        plt.title(f"Q-NN Performance History: Validation")
+        plt.title(f"Stat-NN Performance History: Validation")
         plt.xlabel("Epochs")
         plt.ylabel("Loss")
+        plt.show()
+    
+    def plot_stat_mem(self):
+        plt.figure(figsize=(7, 5))
+        plt.subplot(1, 1, 1)
+        # origin lower to bring y-axis 0 to bottom left corner
+        plt.imshow(self.statmem_r, cmap='spring', origin='lower')
+        plt.title(f"Statistical Memory Map. Memory Matrix: {self.stat_mem_sz}\nNumer of Samples: {np.sum(self.statmem_n)}")
+        plt.xlabel("Action: Investment Fraction")
+        plt.ylabel("State: Capital")
+        plt.colorbar()
         plt.show()
     
     @classmethod
@@ -470,6 +481,8 @@ if __name__ == '__main__':
                         ac_range=ac_range, st_range=st_range, eps_foc_init=eps_foc_init, eps_foc_decay=eps_foc_decay, 
                         eps_foc_min=eps_foc_min, eps_foc_gran=eps_foc_gran, discount=gamma, layers_sz=layers_sz, 
                         next_step_lookup=next_step_lookup, epochs_per_episode=epochs_per_episode)
+    
+    # agent.plot_stat_mem()   # initial memory map
 
     agent.generate_validation_data(prob_arr, outcome_arr, util_func=n_util_func,
                                         st_range=val_st_range, ac_range=val_ac_range, num_st=num_st, num_ac=num_ac)
@@ -479,6 +492,8 @@ if __name__ == '__main__':
     agent.plot_performance(show_legends=True, num_st=num_st, num_ac=num_ac)
 
     agent.plot_training_history(epis_prog=epis_prog)
+
+    agent.plot_stat_mem()   # final memory map
 
     # === ↓ Quick Tests Here ↓ ===
 
