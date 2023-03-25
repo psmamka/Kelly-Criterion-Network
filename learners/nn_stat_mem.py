@@ -87,9 +87,9 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward'))  # for the 
 
 class StatMemAgent:
     def __init__(self, env, util_func=lambda x: x, rng=np.random.default_rng(), stat_mem_sz=(100, 100),
-                    learn_rate=1E-3, st_range=[0.0, 1.0], ac_range=[0.0, 1.0],  eps_foc_init=1.0, 
-                    eps_foc_decay=0.999, eps_foc_min=0.5, eps_foc_gran=0.1, discount=1.0, layers_sz=[20, 20], 
-                    next_step_lookup=True, epochs_per_episode=1):
+                    learn_rate=1E-3, st_range=[0.0, 1.0], ac_range=[0.0, 1.0],  init_samp_per_bin=1, 
+                    eps_foc_init=1.0, eps_foc_decay=0.999, eps_foc_min=0.5, eps_foc_gran=0.1, 
+                    discount=1.0, layers_sz=[20, 20], next_step_lookup=True, epochs_per_episode=1):
         
         self.env = env
         self.util_func = util_func
@@ -114,8 +114,8 @@ class StatMemAgent:
                             0.5 * self.cel_sz[1]
 
         self.statmem_r = np.zeros(stat_mem_sz)   # stat mem reward matrix (average reward per cell)
-        self.statmem_n = np.zeros(stat_mem_sz, dtype=np.uint64)   # stat mem n matrix (number of samples per cell)
-        self._statmem_init()                     # stat mem initialization
+        self.statmem_n = np.zeros(stat_mem_sz, dtype=np.uint64)     # stat mem n matrix (number of samples per cell)
+        self._statmem_init(init_samp_per_bin)        # stat mem initialization
 
         self.eps_f_rad = eps_foc_init           # epsilon greedy parameters: radius
         self.eps_f_dec = eps_foc_decay          # decay rate
@@ -129,7 +129,7 @@ class StatMemAgent:
 
         self._build_qnn(in_sz=self.in_sz, out_sz=self.out_sz, layers_sz=layers_sz)
 
-    def _statmem_init(self):
+    def _statmem_init(self, samples_per_bin=1):
         # simplest way to initialize the stat mem: have a single sample per each mem cell
         # we choose cell centers (left boundary + half width) as initial samples
         st_arr = self.st_bins # + self.cel_sz[0] / 2.0  
@@ -137,11 +137,12 @@ class StatMemAgent:
 
         for i, st in enumerate(st_arr):
             for j, ac in enumerate(ac_arr):
-                self.env.reset(start_cap=st)
-                next_st, _, _ = self.env.step(bet_size= st * ac)
-                r = self.state_change_reward(state=st, next_st=next_st)
-                self.statmem_r[i, j] = r
-                self.statmem_n[i, j] = 1
+                for k in range(samples_per_bin):
+                    self.env.reset(start_cap=st)
+                    next_st, _, _ = self.env.step(bet_size= st * ac)
+                    r = self.state_change_reward(state=st, next_st=next_st)
+                    self.statmem_r[i, j] += r / samples_per_bin
+                    self.statmem_n[i, j] += 1
     
     def state_change_reward(self, state, next_st):
         return self.util_func(next_st) - self.util_func(state)    # utility reward
@@ -444,7 +445,8 @@ if __name__ == '__main__':
         n_util_func = util_func
     
     stat_mem_sz = (25, 25)  # (100, 100)
-    lr = 2E-5 # 2E-5 1E-5
+    init_samp_per_bin = 1   # 0 | 1 | 10  Number of samples per memory bin upon initialization
+    lr = 1E-5 # 2E-5 1E-5
     st_range = np.array([0.0, 1.0])
     ac_range = np.array([0.0, 1.0])
     eps_foc_init = 1.5          # <=== epsilon focus implementation: initial radius of interval
@@ -452,7 +454,7 @@ if __name__ == '__main__':
     eps_foc_min = 0.3   # min action radius
     eps_foc_gran = 0.1  # epsilon focus granularity, in terms of state values
     gamma = 0.0
-    layers_sz = [15, 15] # [10, 10] [5, 10, 5] [12, 12] [15, 15] [17, 17] [20, 20]
+    layers_sz = [25, 25] # [10, 10] [5, 10, 5] [12, 12] [15, 15] [17, 17] [20, 20]
     next_step_lookup = False    # True: q system | False: the simplest case, no looking up the next step (same as gamma=0)
     epochs_per_episode = 1      # number of cycles of training in self.learn_step per episode/call
 
